@@ -1,0 +1,16 @@
+from decimal import Decimal
+
+D = Decimal
+
+CPP_YMPE = D("71300")
+CPP_BASIC_EXEMPTION = D("3500")
+CPP_RATE = D("0.0595")
+CPP_MAX_EMPLOYEE = D("4034.10")
+
+CPP_YAMPE = D("81200")
+CPP2_RATE = D("0.04")
+CPP2_MAX_EMPLOYEE = D("396.00")
+
+EI_MIE = D("65700")
+EI_RATE_EMP = D("0.0164")
+EI_MAX_EMPLOYEE = (EI_MIE * EI_RATE_EMP).quantize(D("0.01"))
