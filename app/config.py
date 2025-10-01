@@ -18,6 +18,12 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.lower() in ENV_BOOL_TRUE
 
 
+def _env_env() -> Literal["CERT", "PROD"]:
+    value = os.getenv("EFILE_ENV", "CERT")
+    upper = value.upper()
+    return "CERT" if upper not in {"CERT", "PROD"} else upper
+
+
 @dataclass(frozen=True)
 class EfileProfile:
     environment: Literal["CERT", "PROD"]
@@ -29,7 +35,7 @@ class EfileProfile:
 
 class Settings(BaseModel):
     feature_efile_xml: bool = Field(default_factory=lambda: _env_bool("FEATURE_EFILE_XML", False))
-    efile_environment: Literal["CERT", "PROD"] = Field(default_factory=lambda: os.getenv("EFILE_ENV", "CERT").upper())
+    efile_environment: Literal["CERT", "PROD"] = Field(default_factory=_env_env)
     software_id_cert: str = Field(default_factory=lambda: os.getenv("EFILE_SOFTWARE_ID_CERT", "TAXAPP-CERT"))
     software_id_prod: str = Field(default_factory=lambda: os.getenv("EFILE_SOFTWARE_ID_PROD", "TAXAPP-PROD"))
     transmitter_id_cert: str = Field(default_factory=lambda: os.getenv("EFILE_TRANSMITTER_ID_CERT", "900000"))
