@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncContextManager
 
 import httpx
 from fastapi import FastAPI
@@ -92,7 +93,7 @@ def build_application_lifespan(
     startup_hook: Hook | None = None,
     shutdown_hook: Hook | None = None,
     http_timeout: float = 15.0,
-) -> Callable[[FastAPI], AsyncIterator[None]]:
+) -> Callable[[FastAPI], AsyncContextManager[None]]:
     base_logger = logging.getLogger("tax_app")
 
     @asynccontextmanager
