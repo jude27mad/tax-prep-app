@@ -1,4 +1,3 @@
-from decimal import Decimal
 from app.core.models import ReturnCalc, ReturnInput
 
 class EfileEnvelope:
@@ -23,3 +22,4 @@ def build_records(env: EfileEnvelope, in_: ReturnInput, calc: ReturnCalc) -> dic
       "totals": calc.totals,
     },
   }
+

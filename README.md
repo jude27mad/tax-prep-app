@@ -1,44 +1,102 @@
-# Tax Preparer App
+# Tax App
 
-Closed, paid preparer software scaffold with modules for transmission, validations, print-forms, and API.
+Comprehensive CRA-focused toolkit comprising:
 
-**Default filing year: 2025** (2024 remains available for backfiling through Jan 30, 2026.)
+- **Estimator API** (`app/main.py`): quick personal tax estimates for annual slips and payroll checks.
+- **Preparer API** (`app/api/http.py`): end-to-end T1 workflow including validation, XML assembly (T619/T1/T183), EFILE transmission helpers, printouts, and certification tooling.
+- **Support packages**: reusable calculators, schema cache, artifact retention, and ingestion scripts.
 
-## Quick start
+## Project layout
+
+```
+.
+├── app
+│   ├── api/            # Preparer FastAPI application
+│   ├── core/           # Domain models, calculators, validators
+│   ├── efile/          # XML builders, transmission client, retention logic
+│   ├── main.py         # Estimator FastAPI application
+│   ├── lifespan.py     # Shared startup/shutdown manager
+│   └── schemas/        # CRA XSD cache (T619, T1, T183, etc.)
+├── docs/               # Operational guidance (e.g., CRA suitability checklist)
+├── scripts/            # Replay, reject scan, coverage gate, IFT mock, purge jobs
+├── tests/              # Unit, e2e, golden XML, fuzz suites
+└── requirements.txt
+```
+
+## Quick start (single terminal)
 
 ```bash
+cd "C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App"
 python -m venv .venv
-. .venv/Scripts/activate
+. .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.api.http:app --reload --port 8000
 ```
 
-Visit <http://127.0.0.1:8000/docs> for interactive API docs.
+## Running the APIs
 
-## API example (2025)
+Open separate terminals for each API (activate `.venv` in both).
+
+### Estimator (port 8000)
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+Docs: <http://127.0.0.1:8000/docs>
+
+### Preparer (port 8001)
+```bash
+uvicorn app.api.http:app --reload --port 8001
+```
+Docs: <http://127.0.0.1:8001/docs>
+
+Stop any server with `Ctrl+C`. 
+
+## Environment configuration
+
+Key environment variables (defaults shown):
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `FEATURE_EFILE_XML` | Enable XML transmission flow | `false` |
+| `EFILE_ENV` | Environment selector (`CERT`/`PROD`) | `CERT` |
+| `EFILE_SOFTWARE_ID_CERT` / `EFILE_SOFTWARE_ID_PROD` | CRA Software IDs | `TAXAPP-CERT`, `TAXAPP-PROD` |
+| `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs | `900000`, `900001` |
+| `EFILE_ENDPOINT_CERT` / `EFILE_ENDPOINT_PROD` | CRA endpoints | `http://127.0.0.1:9000`, `https://prod-placeholder` |
+| `SOFTWARE_VERSION` | Application version string | `0.0.3` |
+| `T183_CRYPTO_KEY` | Optional Fernet key for encrypted T183/T2183 retention | unset |
+| `RETENTION_T2183_ENABLED` | Toggle T2183 retention | `false` |
+
+Set vars in the terminal before launching the preparer API, e.g.:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tax/2025/compute \
-  -H "Content-Type: application/json" \
-  -d '{
-        "taxable_income": 85000,
-        "net_income": 85000,
-        "personal_credit_amounts": {
-          "cpp_contrib": "4034.10",
-          "ei_premiums": "1077.48"
-        }
-      }'
+set FEATURE_EFILE_XML=true
+set EFILE_SOFTWARE_ID_CERT=YOUR_SOFTWARE_ID
+set EFILE_TRANSMITTER_ID_CERT=YOUR_TRANSMITTER_ID
+set EFILE_ENDPOINT_CERT=https://cra-cert-endpoint
 ```
 
-## Reference rates (CRA 2025)
+## CRA tooling highlights
 
-- **Federal**: brackets at ,375 / ,750 / ,882 / ,414 with blended 14.5% first-bracket rate; BPA max ,129 phased to ,538 (Finance Canada indexation notice, Nov 2024).
-- **Ontario**: brackets at ,886 / ,775 / ,000 / ,000; BPA ,747; surtax on Ontario basic tax over ,710 (20%) and ,307 (+36%) (CRA 2025 Ontario payroll tables).
+- **Schema validation**: XSD-validated T1/T183/T619 XML with `sbmt_ref_id` sequence IDs.
+- **Artifact retention**: encrypted T183 (and optional T2183) storage, purge scripts.
+- **Transmission resilience**: duplicate digest detection, exponential backoff, circuit breaker, masked logging.
+- **Cert support**: `scripts/run_cert_tests.py`, `scripts/replay_payloads.py`, `scripts/reject_scan.py`.
+- **Health visibility**: `/health` includes build metadata, feature flags, schema digests, and last submission ID.
 
-## Packages
+## Testing
 
-- app/core: domain models, calculators, validators
-- app/efile: transmission payloads, serializer, client, error map, T183, storage
-- app/printout: PDF print-and-mail fallback
-- app/api: FastAPI endpoints
-- tests: unit and e2e
+Run the full suite:
+
+```bash
+pytest
+```
+
+Golden XML fixtures live in `tests/golden/`; fuzz tests rely on Hypothesis.
+
+## Additional docs
+
+- [CRA EFILE Suitability Checklist](docs/efile_suitability.md)
+- Scripts folder contains utilities for certification, replay, reject analysis, and the local IFT mock (`scripts/ift_mock.py`).
+
+---
+
+Need help? See the interactive docs (`/docs`) or open `tests/unit/` for examples.

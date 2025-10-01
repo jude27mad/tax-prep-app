@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -36,3 +35,5 @@ async def test_cert_runner_saves_artifacts(tmp_path, monkeypatch):
     saved_files = list(Path(tmp_path).glob("**/*"))
     assert any("CERT0001" in p.name for p in saved_files)
     get_settings.cache_clear()
+
+

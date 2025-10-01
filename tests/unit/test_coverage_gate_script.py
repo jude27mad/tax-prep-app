@@ -1,5 +1,4 @@
 import sys
-from pathlib import Path
 
 from scripts import coverage_gate
 
@@ -10,3 +9,5 @@ def test_coverage_gate_pass(tmp_path, monkeypatch):
     path.write_text(xml, encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["coverage_gate", str(path), "--minimum", "80"])
     coverage_gate.main()
+
+

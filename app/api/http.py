@@ -1,4 +1,3 @@
-from decimal import Decimal
 import logging
 
 from fastapi import APIRouter, FastAPI, HTTPException
@@ -14,11 +13,11 @@ from app.efile.service import (
     record_transmit_outcome,
 )
 from app.efile.transmit import CircuitOpenError, EfileClient
+from ..efile.records import EfileEnvelope, build_records
 from ..core.models import ReturnCalc, ReturnInput
-from ..core.tax_years._2024_alias import compute_full_2024, compute_return as compute_return_2024
-from ..core.tax_years._2025_alias import compute_full_2025, compute_return as compute_return_2025
+from ..core.tax_years._2024_alias import compute_return as compute_return_2024
+from ..core.tax_years._2025_alias import compute_return as compute_return_2025
 from ..core.validate.pre_submit import validate_return_input
-from ..efile.records import build_records
 from ..efile.serialize import serialize
 from ..printout.t1_render import render_t1_pdf
 
@@ -184,3 +183,7 @@ async def legacy_efile(req: TransmitRequest):
 
 
 app.include_router(router)
+
+
+
+

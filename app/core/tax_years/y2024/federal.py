@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
 D = Decimal
@@ -55,3 +54,4 @@ def federal_nrtcs_2024(net_income: D, personal_credits: dict[str, D]) -> D:
     base = federal_bpa_2024(net_income)
     total_amount = base + sum((personal_credits or {}).values(), D("0"))
     return (total_amount * NRTC_RATE).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -121,3 +121,4 @@ def purge_t2183(base_dir: str, as_of: Optional[datetime] = None) -> list[str]:
         logger.info("T2183 retention disabled; skipping purge")
         return []
     return _purge_authorizations(base_dir, "t2183", as_of)
+
