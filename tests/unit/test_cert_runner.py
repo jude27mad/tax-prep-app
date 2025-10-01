@@ -24,6 +24,7 @@ async def test_cert_runner_saves_artifacts(tmp_path, monkeypatch):
             xml_bytes=b"<xml />",
             endpoint="http://localhost:8000",
             digest="deadbeef",
+            sbmt_ref_id="CERT0001",
         )
 
     with patch.object(run_cert_tests, "prepare_xml_submission", new=fake_prepare):
@@ -31,6 +32,7 @@ async def test_cert_runner_saves_artifacts(tmp_path, monkeypatch):
             results = await run_cert_tests._run(preparer_app, [case], tmp_path)
 
     assert len(results) == 1
-    saved_files = list(Path(tmp_path).glob("*"))
-    assert saved_files
+    assert results[0]["sbmt_ref_id"] == "CERT0001"
+    saved_files = list(Path(tmp_path).glob("**/*"))
+    assert any("CERT0001" in p.name for p in saved_files)
     get_settings.cache_clear()

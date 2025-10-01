@@ -22,13 +22,13 @@ async def _run_case(app: FastAPI, case: ReturnInput, artifact_dir: Path) -> dict
     prepared = prepare_xml_submission(app, case, calc)
 
     suffix = case.taxpayer.sin[-4:] if case.taxpayer.sin else "anon"
-    xml_path = artifact_dir / f"request_{suffix}.xml"
+    xml_path = artifact_dir / f"{prepared.sbmt_ref_id}_{suffix}_request.xml"
     xml_path.write_bytes(prepared.xml_bytes)
 
     client = EfileClient(prepared.endpoint)
     response = await client.send(prepared.xml_bytes, content_type="application/xml")
 
-    response_path = artifact_dir / f"response_{suffix}.json"
+    response_path = artifact_dir / f"{prepared.sbmt_ref_id}_{suffix}_response.json"
     response_path.write_text(json.dumps(response, indent=2))
 
     raw_codes = response.get("codes") or response.get("reject_codes") or []
@@ -36,6 +36,7 @@ async def _run_case(app: FastAPI, case: ReturnInput, artifact_dir: Path) -> dict
 
     return {
         "digest": prepared.digest,
+        "sbmt_ref_id": prepared.sbmt_ref_id,
         "codes": raw_codes,
         "explanations": mapped,
         "files": {

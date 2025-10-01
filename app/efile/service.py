@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import secrets
+import string
 from typing import Any
 from pathlib import Path
 
@@ -16,6 +18,14 @@ from app.efile.records import EfileEnvelope
 from app.efile.t183 import mask_sin
 from app.efile.t619 import T619Package, build_t619_package
 
+
+
+
+def _generate_sbmt_ref_id() -> str:
+    now = datetime.now(timezone.utc).strftime("%y%j%H")  # year+day-of-year+hour
+    alphabet = string.ascii_uppercase + string.digits
+    random_part = ''.join(secrets.choice(alphabet) for _ in range(8 - len(now)))
+    return (now + random_part)[:8]
 
 def _ensure_submission_cache(app: FastAPI) -> set[str]:
     cache = getattr(app.state, "submission_digests", None)
@@ -47,11 +57,12 @@ def _persist_artifacts(app: FastAPI, digest: str, package: T619Package) -> None:
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     day_dir = artifact_root / today
     day_dir.mkdir(parents=True, exist_ok=True)
-    (day_dir / f"{digest}_envelope.xml").write_text(package.envelope_xml, encoding="utf-8")
-    (day_dir / f"{digest}_t1.xml").write_text(package.t1_xml, encoding="utf-8")
-    (day_dir / f"{digest}_t183.xml").write_text(package.t183_xml, encoding="utf-8")
+    prefix = f"{package.sbmt_ref_id}_{digest}"
+    (day_dir / f"{prefix}_envelope.xml").write_text(package.envelope_xml, encoding="utf-8")
+    (day_dir / f"{prefix}_t1.xml").write_text(package.t1_xml, encoding="utf-8")
+    (day_dir / f"{prefix}_t183.xml").write_text(package.t183_xml, encoding="utf-8")
     summary_path = summary_root / f"{today}.json"
-    entry = {"digest": digest, "time_utc": datetime.now(timezone.utc).isoformat(), "documents": list(package.payload_documents.keys())}
+    entry = {"digest": digest, "sbmt_ref_id": package.sbmt_ref_id, "time_utc": datetime.now(timezone.utc).isoformat(), "documents": list(package.payload_documents.keys())}
     if summary_path.exists():
         try:
             data = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -70,6 +81,7 @@ class PreparedEfile:
     envelope: EfileEnvelope
     package: T619Package
     digest: str
+    sbmt_ref_id: str
     xml_bytes: bytes
     endpoint: str
 
@@ -138,9 +150,12 @@ def prepare_xml_submission(
         "TransmitterId": profile.transmitter_id,
     }
 
-    package = build_t619_package(req, calc, profile_dict, schema_cache)
+    sbmt_ref_id = _generate_sbmt_ref_id()
+    package = build_t619_package(req, calc, profile_dict, schema_cache, sbmt_ref_id)
+    canonical_source = (package.t1_xml + package.t183_xml + profile.environment + profile.software_id + profile.software_version + profile.transmitter_id).encode("utf-8")
+    digest = sha256(canonical_source).hexdigest()
+
     xml_bytes = package.envelope_xml.encode("utf-8")
-    digest = sha256(xml_bytes).hexdigest()
 
     cache = _ensure_submission_cache(app)
     if digest in cache:
@@ -157,11 +172,13 @@ def prepare_xml_submission(
 
     _persist_artifacts(app, digest, package)
     cache.add(digest)
+    app.state.last_sbmt_ref_id = sbmt_ref_id
 
     return PreparedEfile(
         envelope=envelope,
         package=package,
         digest=digest,
+        sbmt_ref_id=sbmt_ref_id,
         xml_bytes=xml_bytes,
         endpoint=endpoint,
     )
@@ -186,6 +203,7 @@ def record_transmit_outcome(app: FastAPI, digest: str, response: dict[str, Any])
     submissions = data.get("submissions", [])
     for entry in submissions[::-1]:
         if entry.get("digest") == digest:
+            entry.setdefault("sbmt_ref_id", getattr(app.state, "last_sbmt_ref_id", None))
             entry["response"] = response
             entry["updated_at"] = datetime.now(timezone.utc).isoformat()
             break

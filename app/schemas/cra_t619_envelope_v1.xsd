@@ -9,6 +9,7 @@
   <xs:element name="T619Transmission">
     <xs:complexType>
       <xs:sequence>
+        <xs:element name="sbmt_ref_id" type="xs:string"/>
         <xs:element name="Environment" type="xs:string"/>
         <xs:element name="SoftwareId" type="xs:string"/>
         <xs:element name="SoftwareVersion" type="xs:string"/>

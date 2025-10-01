@@ -124,7 +124,8 @@ def _contribution_status(actual: float, maximum: float) -> str:
 def health():
     settings = getattr(app.state, "settings", get_settings())
     schema_versions = getattr(app.state, "schema_versions", {})
-    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml}, "schemas": schema_versions}
+    last_sbmt_ref_id = getattr(app.state, "last_sbmt_ref_id", None)
+    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml, "sbmt_ref_id_last": last_sbmt_ref_id}, "schemas": schema_versions}
 
 
 @app.get("/tax/estimate")

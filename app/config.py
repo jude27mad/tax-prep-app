@@ -47,6 +47,7 @@ class Settings(BaseModel):
     transmit_backoff_factor: float = Field(default_factory=lambda: float(os.getenv("TRANSMIT_BACKOFF", "0.5")))
     transmit_circuit_threshold: int = Field(default_factory=lambda: int(os.getenv("TRANSMIT_CIRCUIT_THRESHOLD", "5")))
     transmit_circuit_cooldown: float = Field(default_factory=lambda: float(os.getenv("TRANSMIT_CIRCUIT_COOLDOWN", "30")))
+    retention_t2183_enabled: bool = Field(default_factory=lambda: _env_bool("RETENTION_T2183_ENABLED", False))
 
     model_config = ConfigDict(frozen=True)
 

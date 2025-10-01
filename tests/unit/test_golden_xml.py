@@ -18,7 +18,8 @@ def test_t619_matches_golden():
         "SoftwareVersion": "0.0.3",
         "TransmitterId": "900000",
     }
-    package = build_t619_package(req, calc, profile, _schema_cache())
+    package = build_t619_package(req, calc, profile, _schema_cache(), "CERTX999")
+    assert package.sbmt_ref_id == "CERTX999"
     golden_dir = Path("tests/golden")
     assert package.envelope_xml == (golden_dir / "t619_envelope.xml").read_text(encoding="utf-8")
     assert package.t1_xml == (golden_dir / "t1_return.xml").read_text(encoding="utf-8")

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <T619Transmission xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t619/1.0">
+  <sbmt_ref_id>CERTX999</sbmt_ref_id>
   <Environment>CERT</Environment>
   <SoftwareId>TAXAPP-CERT</SoftwareId>
   <SoftwareVersion>0.0.3</SoftwareVersion>

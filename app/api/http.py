@@ -80,6 +80,7 @@ def _compute_for_year(req: ReturnInput) -> ReturnCalc:
 def health():
     settings = getattr(app.state, "settings", get_settings())
     schema_versions = getattr(app.state, "schema_versions", {})
+    last_sbmt_ref_id = getattr(app.state, "last_sbmt_ref_id", None)
     return {
         "status": "ok",
         "default_tax_year": DEFAULT_TAX_YEAR,
@@ -88,6 +89,7 @@ def health():
             "sha": settings.build_sha,
             "efile_env": settings.efile_environment,
             "feature_efile_xml": settings.feature_efile_xml,
+            "sbmt_ref_id_last": last_sbmt_ref_id,
         },
         "schemas": schema_versions,
     }
@@ -128,6 +130,7 @@ async def prepare_efile(req: TransmitRequest):
         raise exc
 
     context = pii_safe_context(req)
+    context["sbmt_ref_id"] = prepared.sbmt_ref_id
     logger.info("Prepared EFILE XML payload", extra={"submission": context})
 
     client = EfileClient(prepared.endpoint)
@@ -141,12 +144,13 @@ async def prepare_efile(req: TransmitRequest):
         raise HTTPException(status_code=502, detail="EFILE transmission failed") from exc
 
     logger.info(
-        "Transmitted EFILE XML payload", extra={"submission": context, "digest": prepared.digest}
+        "Transmitted EFILE XML payload", extra={"submission": context, "digest": prepared.digest, "sbmt_ref_id": prepared.sbmt_ref_id}
     )
     record_transmit_outcome(app, prepared.digest, response)
 
     return {
         "digest": prepared.digest,
+        "sbmt_ref_id": prepared.sbmt_ref_id,
         "envelope": {
             "software_id": prepared.envelope.software_id,
             "software_version": prepared.envelope.software_ver,

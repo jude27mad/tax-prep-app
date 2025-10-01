@@ -41,3 +41,6 @@ async def test_transmit_path():
     assert body["envelope"]["software_id"] == "X"
     assert body["response"] == {"codes": ["E000"]}
     assert body["digest"]
+    assert body["sbmt_ref_id"]
+    assert len(body["sbmt_ref_id"]) == 8
+    assert body["sbmt_ref_id"].isalnum()

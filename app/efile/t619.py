@@ -25,6 +25,7 @@ _COMPILED_SCHEMAS: Dict[str, xmlschema.XMLSchemaBase] = {}
 
 @dataclass
 class T619Package:
+    sbmt_ref_id: str
     t1_xml: str
     t183_xml: str
     envelope_xml: str
@@ -69,8 +70,9 @@ def _build_t183_element(data: dict[str, Any]) -> Element:
     return root
 
 
-def _build_t619_element(profile: dict[str, str], payload_b64: str) -> Element:
+def _build_t619_element(profile: dict[str, str], payload_b64: str, sbmt_ref_id: str) -> Element:
     root = Element("T619Transmission", {"xmlns": NS_T619})
+    SubElement(root, "sbmt_ref_id").text = sbmt_ref_id
     for key, value in profile.items():
         SubElement(root, key).text = value
     SubElement(root, "Payload").text = payload_b64
@@ -106,6 +108,7 @@ def build_t619_package(
     calc: ReturnCalc,
     profile: dict[str, str],
     schema_cache: dict[str, str],
+    sbmt_ref_id: str,
 ) -> T619Package:
     t1_data = map_t1_fields(req, calc)
     t183_data = map_t183_fields(req)
@@ -125,11 +128,12 @@ def build_t619_package(
     }
     payload_blob = base64.b64encode(str(payload_documents).encode("utf-8")).decode("ascii")
 
-    envelope_element = _build_t619_element(profile, payload_blob)
+    envelope_element = _build_t619_element(profile, payload_blob, sbmt_ref_id)
     envelope_xml = _prettify(envelope_element)
     _validate(envelope_xml, schema_cache, SCHEMA_T619)
 
     return T619Package(
+        sbmt_ref_id=sbmt_ref_id,
         t1_xml=t1_xml,
         t183_xml=t183_xml,
         envelope_xml=envelope_xml,

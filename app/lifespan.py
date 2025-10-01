@@ -135,7 +135,7 @@ def build_application_lifespan(
             if telemetry_handler is not None:
                 logger.removeHandler(telemetry_handler)
                 telemetry_handler.close()
-            for attr in ("settings", "http_client", "cra_schema_cache", "schema_versions", "reportlab_fonts", "telemetry_handler", "artifact_root", "daily_summary_root", "submission_digests", "summary_index", "app_label"):
+            for attr in ("settings", "http_client", "cra_schema_cache", "schema_versions", "reportlab_fonts", "telemetry_handler", "artifact_root", "daily_summary_root", "submission_digests", "summary_index", "last_sbmt_ref_id", "app_label"):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)
             logger.info("Shutdown complete")

@@ -27,10 +27,12 @@ def main() -> None:
         for submission in payload.get("submissions", []):
             response = submission.get("response", {})
             codes = submission.get("reject_codes") or response.get("codes") or []
+            sbmt_id = submission.get("sbmt_ref_id")
             for code in codes:
-                totals[code] += 1
-    for code, count in totals.most_common():
-        print(f"{code}: {count} :: {explain_error(code)}")
+                totals[(code, sbmt_id)] += 1
+    for (code, sbmt_id), count in totals.most_common():
+        suffix = f" (sbmt_ref_id={sbmt_id})" if sbmt_id else ""
+        print(f"{code}: {count}{suffix} :: {explain_error(code)}")
 
 
 if __name__ == "__main__":

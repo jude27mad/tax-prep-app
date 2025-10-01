@@ -15,9 +15,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def _send_file(client: EfileClient, path: Path) -> tuple[str, str]:
+def _extract_sbmt_ref_id(path: Path) -> str:
+    name = path.stem
+    return name.split("_")[0] if "_" in name else "UNKNOWN"
+
+
+async def _send_file(client: EfileClient, path: Path) -> tuple[str, str, str]:
     response = await client.send(path.read_bytes(), content_type="application/xml")
-    return path.name, response.get("status", "sent")
+    return path.name, response.get("status", "sent"), _extract_sbmt_ref_id(path)
 
 
 async def _run(args: argparse.Namespace) -> None:
@@ -26,8 +31,8 @@ async def _run(args: argparse.Namespace) -> None:
     payload_dir = Path(args.payload_dir)
     for path in sorted(payload_dir.glob("*_envelope.xml")):
         tasks.append(_send_file(client, path))
-    for name, status in await asyncio.gather(*tasks):
-        print(f"{name}: {status}")
+    for name, status, sbmt_ref_id in await asyncio.gather(*tasks):
+        print(f"{name} [sbmt_ref_id={sbmt_ref_id}]: {status}")
 
 
 def main() -> None:

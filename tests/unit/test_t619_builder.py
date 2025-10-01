@@ -21,7 +21,9 @@ def test_build_t619_package():
         "SoftwareVersion": "0.1.0",
         "TransmitterId": "T",
     }
-    package = build_t619_package(req, calc, profile, _schema_cache())
+    sbmt_ref_id = "CERT0001"
+    package = build_t619_package(req, calc, profile, _schema_cache(), sbmt_ref_id)
+    assert package.sbmt_ref_id == sbmt_ref_id
     assert "<T1Return" in package.t1_xml
-    assert "Payload" in package.envelope_xml
+    assert "<sbmt_ref_id>CERT0001</sbmt_ref_id>" in package.envelope_xml
     assert package.payload_documents["t1"].startswith("<?xml")

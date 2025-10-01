@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from app.efile.crypto import decrypt, encrypt
+from app.config import get_settings
+
+from .crypto import decrypt, encrypt
+
+logger = logging.getLogger("tax_app")
 
 RETENTION_YEARS = 6
 
@@ -35,8 +40,9 @@ def _compute_expiry(signed_at: datetime) -> datetime:
     try:
         return signed_at.replace(year=signed_at.year + RETENTION_YEARS)
     except ValueError:
-        # handle Feb 29, etc.
         return signed_at + (datetime(signed_at.year + RETENTION_YEARS, 3, 1) - datetime(signed_at.year, 3, 1))
+
+
 
 
 def build_record(original_sin: str, signed_at: datetime, pdf_path: str, ip_hash: Optional[str] = None, user_agent_hash: Optional[str] = None) -> T183Record:
@@ -52,7 +58,7 @@ def build_record(original_sin: str, signed_at: datetime, pdf_path: str, ip_hash:
     )
 
 
-def store_signed(record: T183Record, base_dir: str, tax_year: int, original_sin: str) -> str:
+def _store_authorization(record: T183Record, base_dir: str, tax_year: int, original_sin: str, prefix: str) -> str:
     target_dir = retention_path(base_dir, tax_year, original_sin)
     payload = asdict(record)
     payload["retention_years"] = RETENTION_YEARS
@@ -60,7 +66,7 @@ def store_signed(record: T183Record, base_dir: str, tax_year: int, original_sin:
     encrypted = encrypt(raw)
     is_encrypted = encrypted != raw
     suffix = "enc" if is_encrypted else "json"
-    filename = f"t183_{int(record.signed_at.timestamp())}.{suffix}"
+    filename = f"{prefix}_{int(record.signed_at.timestamp())}.{suffix}"
     path = target_dir / filename
     if is_encrypted:
         path.write_bytes(encrypted)
@@ -69,15 +75,26 @@ def store_signed(record: T183Record, base_dir: str, tax_year: int, original_sin:
     return str(path)
 
 
-def purge_expired(base_dir: str, as_of: Optional[datetime] = None) -> list[str]:
+def store_signed(record: T183Record, base_dir: str, tax_year: int, original_sin: str) -> str:
+    return _store_authorization(record, base_dir, tax_year, original_sin, "t183")
+
+
+def store_t2183(record: T183Record, base_dir: str, tax_year: int, original_sin: str) -> Optional[str]:
+    if not get_settings().retention_t2183_enabled:
+        logger.info("T2183 retention disabled; skipping store for %s", mask_sin(original_sin))
+        return None
+    return _store_authorization(record, base_dir, tax_year, original_sin, "t2183")
+
+
+def _purge_authorizations(base_dir: str, prefix: str, as_of: Optional[datetime]) -> list[str]:
     base_path = Path(base_dir)
     if not base_path.exists():
         return []
-    removed: list[str] = []
     check_time = as_of or datetime.now(timezone.utc)
     if check_time.tzinfo is None:
         check_time = check_time.replace(tzinfo=timezone.utc)
-    for file in base_path.rglob("t183_*"):
+    removed: list[str] = []
+    for file in base_path.rglob(f"{prefix}_*"):
         if file.suffix not in {".json", ".enc"}:
             continue
         try:
@@ -87,11 +104,20 @@ def purge_expired(base_dir: str, as_of: Optional[datetime] = None) -> list[str]:
             expires_at = datetime.fromisoformat(data["expires_at"])
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if check_time.tzinfo is None:
-                check_time = check_time.replace(tzinfo=timezone.utc)
             if expires_at <= check_time:
                 file.unlink()
                 removed.append(str(file))
         except Exception:
             continue
     return removed
+
+
+def purge_expired(base_dir: str, as_of: Optional[datetime] = None) -> list[str]:
+    return _purge_authorizations(base_dir, "t183", as_of)
+
+
+def purge_t2183(base_dir: str, as_of: Optional[datetime] = None) -> list[str]:
+    if not get_settings().retention_t2183_enabled:
+        logger.info("T2183 retention disabled; skipping purge")
+        return []
+    return _purge_authorizations(base_dir, "t2183", as_of)
