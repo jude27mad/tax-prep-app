@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -102,13 +103,19 @@ def build_application_lifespan(
         logger = base_logger.getChild(app_label)
         http_client = httpx.AsyncClient(timeout=http_timeout)
         schema_cache = _load_cra_schema_cache(logger)
+        schema_versions = {name: hashlib.sha256(payload.encode('utf-8')).hexdigest()[:12] for name, payload in schema_cache.items()}
         registered_fonts = _register_reportlab_fonts(logger)
         telemetry_handler = _open_telemetry_sink(logger, app_label)
 
         app.state.settings = settings
         app.state.http_client = http_client
         app.state.cra_schema_cache = schema_cache
+        app.state.schema_versions = schema_versions
         app.state.reportlab_fonts = registered_fonts
+        app.state.artifact_root = settings.artifact_root
+        app.state.daily_summary_root = settings.daily_summary_root
+        app.state.submission_digests = set()
+        app.state.summary_index = {}
         app.state.telemetry_handler = telemetry_handler
         app.state.app_label = app_label
 
@@ -128,7 +135,7 @@ def build_application_lifespan(
             if telemetry_handler is not None:
                 logger.removeHandler(telemetry_handler)
                 telemetry_handler.close()
-            for attr in ("settings", "http_client", "cra_schema_cache", "reportlab_fonts", "telemetry_handler", "app_label"):
+            for attr in ("settings", "http_client", "cra_schema_cache", "schema_versions", "reportlab_fonts", "telemetry_handler", "artifact_root", "daily_summary_root", "submission_digests", "summary_index", "app_label"):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)
             logger.info("Shutdown complete")

@@ -18,6 +18,8 @@ def _prime_state():
         software_id_cert="X",
         software_version="0.1.0",
         transmitter_id_cert="T",
+        artifact_root=str(Path('tests/.tmp_artifacts')),
+        daily_summary_root=str(Path('tests/.tmp_summaries')),
     )
     schema_cache = {
         schema_path.name: schema_path.read_text()

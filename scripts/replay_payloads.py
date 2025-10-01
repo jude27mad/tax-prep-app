@@ -1,0 +1,39 @@
+#!/usr/bin/env python
+from __future__ import annotations
+
+import argparse
+import asyncio
+from pathlib import Path
+
+from app.efile.transmit import EfileClient
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Replay stored EFILE payloads")
+    parser.add_argument("payload_dir", help="Directory containing *_envelope.xml files")
+    parser.add_argument("--endpoint", required=True, help="Base URL of the EFILE endpoint")
+    return parser.parse_args()
+
+
+async def _send_file(client: EfileClient, path: Path) -> tuple[str, str]:
+    response = await client.send(path.read_bytes(), content_type="application/xml")
+    return path.name, response.get("status", "sent")
+
+
+async def _run(args: argparse.Namespace) -> None:
+    client = EfileClient(args.endpoint)
+    tasks = []
+    payload_dir = Path(args.payload_dir)
+    for path in sorted(payload_dir.glob("*_envelope.xml")):
+        tasks.append(_send_file(client, path))
+    for name, status in await asyncio.gather(*tasks):
+        print(f"{name}: {status}")
+
+
+def main() -> None:
+    args = parse_args()
+    asyncio.run(_run(args))
+
+
+if __name__ == "__main__":
+    main()

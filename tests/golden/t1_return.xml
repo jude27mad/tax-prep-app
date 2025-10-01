@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<T1Return xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t1/1.0">
+  <TaxYear>2025</TaxYear>
+  <TaxpayerSIN>046454286</TaxpayerSIN>
+  <Province>ON</Province>
+  <NetIncome>60000.00</NetIncome>
+</T1Return>

@@ -123,7 +123,8 @@ def _contribution_status(actual: float, maximum: float) -> str:
 @app.get("/health")
 def health():
     settings = getattr(app.state, "settings", get_settings())
-    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml}}
+    schema_versions = getattr(app.state, "schema_versions", {})
+    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml}, "schemas": schema_versions}
 
 
 @app.get("/tax/estimate")

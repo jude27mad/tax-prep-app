@@ -4,7 +4,7 @@ from app.core.models import Taxpayer, Household, T4Slip, ReturnInput
 
 def make_min_input(tax_year: int = 2025) -> ReturnInput:
   tp = Taxpayer(
-    sin="123456789",
+    sin="046454286",
     first_name="Test",
     last_name="User",
     dob="1990-01-01",

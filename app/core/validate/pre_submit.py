@@ -55,10 +55,31 @@ def _validate_postal_code(value: str) -> bool:
     return all(check(ch) for check, ch in zip(pattern, cleaned))
 
 
+def _luhn_valid(value: str) -> bool:
+    try:
+        digits = [int(ch) for ch in value]
+    except ValueError:
+        return False
+    checksum = 0
+    double = False
+    for digit in reversed(digits):
+        if double:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        checksum += digit
+        double = not double
+    return checksum % 10 == 0
+
+
+def _validate_tax_year(year: int) -> bool:
+    return year in {2024, 2025}
+
+
 def _validate_identity_fields(identity: Identity) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if not identity.sin or len(identity.sin) != 9 or not identity.sin.isdigit():
-        issues.append(ValidationIssue("10001", "SIN must be 9 numeric digits", field="sin"))
+    if not identity.sin or len(identity.sin) != 9 or not identity.sin.isdigit() or not _luhn_valid(identity.sin):
+        issues.append(ValidationIssue("10001", "SIN must be 9 numeric digits and pass Luhn checksum", field="sin"))
     if not identity.first_name.strip() or not identity.last_name.strip():
         issues.append(ValidationIssue("10002", "First and last name are required", field="name"))
     try:
@@ -79,13 +100,23 @@ def _validate_identity_fields(identity: Identity) -> list[ValidationIssue]:
 def validate_before_efile(identity: Identity, return_payload: dict) -> list[ValidationIssue]:
     issues = _validate_identity_fields(identity)
 
-    # Common business-rule guards (examples)
     ti = Decimal(str(return_payload.get("taxable_income", "0")))
     if ti < 0:
         issues.append(ValidationIssue("30010", "Taxable income cannot be negative", field="taxable_income"))
 
+    province = (return_payload.get("province") or identity.province or "").upper()
+    if province not in _ALLOWED_PROVINCES:
+        issues.append(ValidationIssue("10005", "Province must be a valid two-letter Canadian code", field="province"))
+
+    tax_year = return_payload.get("tax_year")
+    if tax_year is not None and not _validate_tax_year(int(tax_year)):
+        issues.append(ValidationIssue("20001", "Unsupported or closed tax year for EFILE transmission", field="tax_year"))
+
     if not return_payload.get("t183_signed_ts"):
         issues.append(ValidationIssue("50010", "T183 signature timestamp is required before transmission", field="t183"))
+
+    if not return_payload.get("t183_ip_hash") or not return_payload.get("t183_user_agent_hash"):
+        issues.append(ValidationIssue("50011", "T183 IP/User-Agent hashes must be captured before transmission", field="t183"))
 
     return issues
 
@@ -96,7 +127,7 @@ def _valid_sin(sin: str) -> bool:
 
 def _validate_taxpayer_details(taxpayer: Taxpayer) -> list[str]:
     issues: list[str] = []
-    if not _valid_sin(taxpayer.sin):
+    if not _valid_sin(taxpayer.sin) or not _luhn_valid(taxpayer.sin):
         issues.append("invalid_sin")
     if not taxpayer.address_line1:
         issues.append("missing_address")

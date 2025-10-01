@@ -7,8 +7,13 @@ from app.lifespan import build_application_lifespan
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
-from app.efile.service import PrefileValidationError, pii_safe_context, prepare_xml_submission
-from app.efile.transmit import EfileClient
+from app.efile.service import (
+    PrefileValidationError,
+    pii_safe_context,
+    prepare_xml_submission,
+    record_transmit_outcome,
+)
+from app.efile.transmit import CircuitOpenError, EfileClient
 from ..core.models import ReturnCalc, ReturnInput
 from ..core.tax_years._2024_alias import compute_full_2024, compute_return as compute_return_2024
 from ..core.tax_years._2025_alias import compute_full_2025, compute_return as compute_return_2025
@@ -74,6 +79,7 @@ def _compute_for_year(req: ReturnInput) -> ReturnCalc:
 @app.get("/health")
 def health():
     settings = getattr(app.state, "settings", get_settings())
+    schema_versions = getattr(app.state, "schema_versions", {})
     return {
         "status": "ok",
         "default_tax_year": DEFAULT_TAX_YEAR,
@@ -83,6 +89,7 @@ def health():
             "efile_env": settings.efile_environment,
             "feature_efile_xml": settings.feature_efile_xml,
         },
+        "schemas": schema_versions,
     }
 
 
@@ -124,11 +131,19 @@ async def prepare_efile(req: TransmitRequest):
     logger.info("Prepared EFILE XML payload", extra={"submission": context})
 
     client = EfileClient(prepared.endpoint)
-    response = await client.send(prepared.xml_bytes, content_type="application/xml")
+    try:
+        response = await client.send(prepared.xml_bytes, content_type="application/xml")
+    except CircuitOpenError as exc:
+        logger.error("EFILE circuit open", extra={"submission": context, "error": str(exc)})
+        raise HTTPException(status_code=503, detail="EFILE transmission circuit open") from exc
+    except RuntimeError as exc:
+        logger.error("EFILE transmission failed", extra={"submission": context, "error": str(exc)})
+        raise HTTPException(status_code=502, detail="EFILE transmission failed") from exc
 
     logger.info(
         "Transmitted EFILE XML payload", extra={"submission": context, "digest": prepared.digest}
     )
+    record_transmit_outcome(app, prepared.digest, response)
 
     return {
         "digest": prepared.digest,

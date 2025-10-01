@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
+import json
 from typing import Any
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 
@@ -12,6 +15,54 @@ from app.core.validate.pre_submit import Identity, ValidationIssue, validate_bef
 from app.efile.records import EfileEnvelope
 from app.efile.t183 import mask_sin
 from app.efile.t619 import T619Package, build_t619_package
+
+
+def _ensure_submission_cache(app: FastAPI) -> set[str]:
+    cache = getattr(app.state, "submission_digests", None)
+    if cache is None:
+        cache = set()
+        app.state.submission_digests = cache
+    return cache
+
+
+
+
+def _summary_index(app: FastAPI) -> dict[str, Path]:
+    index = getattr(app.state, "summary_index", None)
+    if index is None:
+        index = {}
+        app.state.summary_index = index
+    return index
+
+def _artifact_directories(app: FastAPI) -> tuple[Path, Path]:
+    artifact_root = Path(getattr(app.state, "artifact_root", "artifacts"))
+    summary_root = Path(getattr(app.state, "daily_summary_root", artifact_root / "summaries"))
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    summary_root.mkdir(parents=True, exist_ok=True)
+    return artifact_root, summary_root
+
+
+def _persist_artifacts(app: FastAPI, digest: str, package: T619Package) -> None:
+    artifact_root, summary_root = _artifact_directories(app)
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    day_dir = artifact_root / today
+    day_dir.mkdir(parents=True, exist_ok=True)
+    (day_dir / f"{digest}_envelope.xml").write_text(package.envelope_xml, encoding="utf-8")
+    (day_dir / f"{digest}_t1.xml").write_text(package.t1_xml, encoding="utf-8")
+    (day_dir / f"{digest}_t183.xml").write_text(package.t183_xml, encoding="utf-8")
+    summary_path = summary_root / f"{today}.json"
+    entry = {"digest": digest, "time_utc": datetime.now(timezone.utc).isoformat(), "documents": list(package.payload_documents.keys())}
+    if summary_path.exists():
+        try:
+            data = json.loads(summary_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            data = {"submissions": []}
+    else:
+        data = {"submissions": []}
+    submissions = data.setdefault("submissions", [])
+    submissions.append(entry)
+    summary_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _summary_index(app)[digest] = summary_path
 
 
 @dataclass
@@ -48,7 +99,11 @@ def enforce_prefile_gates(req: ReturnInput, calc: ReturnCalc) -> None:
         _build_identity(req),
         {
             "taxable_income": str(calc.line_items.get("taxable_income", "0")),
+            "province": req.province,
+            "tax_year": req.tax_year,
             "t183_signed_ts": req.t183_signed_ts.isoformat() if req.t183_signed_ts else "",
+            "t183_ip_hash": req.t183_ip_hash,
+            "t183_user_agent_hash": req.t183_user_agent_hash,
         },
     )
     if issues:
@@ -87,6 +142,10 @@ def prepare_xml_submission(
     xml_bytes = package.envelope_xml.encode("utf-8")
     digest = sha256(xml_bytes).hexdigest()
 
+    cache = _ensure_submission_cache(app)
+    if digest in cache:
+        raise HTTPException(status_code=409, detail="Duplicate submission digest detected")
+
     envelope = EfileEnvelope(
         software_id=profile.software_id,
         software_ver=profile.software_version,
@@ -95,6 +154,9 @@ def prepare_xml_submission(
     )
 
     endpoint = _resolve_endpoint(settings, endpoint_override)
+
+    _persist_artifacts(app, digest, package)
+    cache.add(digest)
 
     return PreparedEfile(
         envelope=envelope,
@@ -111,3 +173,20 @@ def pii_safe_context(req: ReturnInput) -> dict[str, Any]:
         "province": req.province,
         "taxpayer_sin_masked": mask_sin(req.taxpayer.sin),
     }
+
+
+def record_transmit_outcome(app: FastAPI, digest: str, response: dict[str, Any]) -> None:
+    summary_path = _summary_index(app).get(digest)
+    if not summary_path or not summary_path.exists():
+        return
+    try:
+        data = json.loads(summary_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    submissions = data.get("submissions", [])
+    for entry in submissions[::-1]:
+        if entry.get("digest") == digest:
+            entry["response"] = response
+            entry["updated_at"] = datetime.now(timezone.utc).isoformat()
+            break
+    summary_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
