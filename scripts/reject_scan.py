@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import defaultdict
 from pathlib import Path
 
 from app.efile.error_map import explain_error
@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     root = Path(args.summary_root)
-    totals: Counter[str] = Counter()
+    totals: dict[tuple[str, str | None], int] = defaultdict(int)
     for path in sorted(root.glob("*.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -30,7 +30,7 @@ def main() -> None:
             sbmt_id = submission.get("sbmt_ref_id")
             for code in codes:
                 totals[(code, sbmt_id)] += 1
-    for (code, sbmt_id), count in totals.most_common():
+    for (code, sbmt_id), count in sorted(totals.items(), key=lambda item: item[1], reverse=True):
         suffix = f" (sbmt_ref_id={sbmt_id})" if sbmt_id else ""
         print(f"{code}: {count}{suffix} :: {explain_error(code)}")
 

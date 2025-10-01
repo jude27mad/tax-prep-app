@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict, field_validator, model_validator
@@ -19,9 +19,9 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_env() -> Literal["CERT", "PROD"]:
-    value = os.getenv("EFILE_ENV", "CERT")
-    upper = value.upper()
-    return "CERT" if upper not in {"CERT", "PROD"} else upper
+    upper = os.getenv("EFILE_ENV", "CERT").upper()
+    normalized = upper if upper in {"CERT", "PROD"} else "CERT"
+    return cast(Literal["CERT", "PROD"], normalized)
 
 
 @dataclass(frozen=True)

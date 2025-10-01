@@ -1,6 +1,7 @@
 # CRA EFILE Suitability Checklist
 
 **2025 filing window**: CRA EFILE opens Feb 24, 2025 and closes Jan 30, 2026. Ensure all 2024 backfile transmissions are submitted before the cutoff.
+
 **T183 retention**: Maintain each signed T183 (masking first five SIN digits) and accompanying e-sign audit trail for six years after the signature date.
 
 1. **Gather credentials**
@@ -9,7 +10,7 @@
    - Signed RC59 (if representing clients) and T183 template
 
 2. **Submit suitability application**
-   - Log in to CRA EFILE portal (https://www.canada.ca/efile)
+   - Log in to CRA EFILE portal (<https://www.canada.ca/efile>)
    - Complete the annual "Application for EFILE" questionnaire
    - Upload supporting documents if CRA requests proof of identity or compliance
 

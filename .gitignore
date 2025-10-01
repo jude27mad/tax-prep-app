@@ -9,3 +9,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.so
+logs/
+artifacts/
+
+tests/.tmp_*/
