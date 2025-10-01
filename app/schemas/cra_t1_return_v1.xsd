@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://www.cra-arc.gc.ca/xmlns/efile/t1/1.0"
+           xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t1/1.0"
+           elementFormDefault="qualified">
+  <xs:annotation>
+    <xs:documentation>Sample CRA T1 return schema (placeholder for integration tests).</xs:documentation>
+  </xs:annotation>
+  <xs:element name="T1Return">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="TaxYear" type="xs:gYear"/>
+        <xs:element name="TaxpayerSIN" type="xs:string"/>
+        <xs:element name="Province" type="xs:string" minOccurs="0"/>
+        <xs:element name="NetIncome" type="xs:decimal" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

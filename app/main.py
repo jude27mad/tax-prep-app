@@ -5,7 +5,10 @@ if __package__ in (None, ""):
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import FastAPI
+
+from app.config import get_settings
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from app.lifespan import build_application_lifespan
 
 from app.tax.ca2025 import (
     FEDERAL_2025,
@@ -21,7 +24,11 @@ from app.tax.on2025 import (
     tax_from_brackets as on_tax,
 )
 
-app = FastAPI(title="Tax App", version="0.0.3")
+app = FastAPI(
+    title="Tax App",
+    version="0.0.3",
+    lifespan=build_application_lifespan("estimator"),
+)
 
 CPP_BASE_EXEMPTION = 3_500.0
 CPP_YMPE_2025 = 71_300.0
@@ -115,7 +122,8 @@ def _contribution_status(actual: float, maximum: float) -> str:
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    settings = getattr(app.state, "settings", get_settings())
+    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml}}
 
 
 @app.get("/tax/estimate")

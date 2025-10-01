@@ -16,4 +16,15 @@ def make_min_input(tax_year: int = 2025) -> ReturnInput:
   )
   hh = Household(marital_status="single")
   t4 = T4Slip(employment_income=Decimal("60000.00"), tax_deducted=Decimal("9000.00"))
-  return ReturnInput(taxpayer=tp, household=hh, slips_t4=[t4], rrsp_contrib=Decimal("0.00"), province="ON", tax_year=tax_year)
+  return ReturnInput(
+    taxpayer=tp,
+    household=hh,
+    slips_t4=[t4],
+    rrsp_contrib=Decimal("0.00"),
+    province="ON",
+    tax_year=tax_year,
+    t183_signed_ts="2025-02-15T09:00:00",
+    t183_ip_hash="hash-ip",
+    t183_user_agent_hash="hash-ua",
+    t183_pdf_path="/tmp/t183.pdf",
+  )

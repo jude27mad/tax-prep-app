@@ -2,29 +2,65 @@ from decimal import Decimal
 import logging
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from pydantic import BaseModel
 
+from app.lifespan import build_application_lifespan
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.config import get_settings
+from app.efile.service import PrefileValidationError, pii_safe_context, prepare_xml_submission
+from app.efile.transmit import EfileClient
 from ..core.models import ReturnCalc, ReturnInput
 from ..core.tax_years._2024_alias import compute_full_2024, compute_return as compute_return_2024
 from ..core.tax_years._2025_alias import compute_full_2025, compute_return as compute_return_2025
 from ..core.validate.pre_submit import validate_return_input
-from ..efile.records import EfileEnvelope, build_records
+from ..efile.records import build_records
 from ..efile.serialize import serialize
-from ..efile.transmit import EfileClient
 from ..printout.t1_render import render_t1_pdf
 
 DEFAULT_TAX_YEAR = 2025
 logger = logging.getLogger("tax_app")
 
+
+async def _announce_default_tax_year(_: FastAPI) -> None:
+    settings = get_settings()
+    logger.info(
+        "Tax App startup complete; default_tax_year=%s env=%s", DEFAULT_TAX_YEAR, settings.efile_environment
+    )
+
+
 app = FastAPI(
     title="Tax Preparer App",
     description="Default year: 2025. Use /tax/2025/compute for current filings; /tax/2024/compute remains available for backfiling.",
+    lifespan=build_application_lifespan("preparer", startup_hook=_announce_default_tax_year),
 )
 router = APIRouter()
 
 
 class PrepareRequest(ReturnInput):
     pass
+
+
+class PrintRequest(ReturnInput):
+    out_path: str
+
+
+class TransmitRequest(ReturnInput):
+    endpoint: str | None = Field(default=None, alias="endpoint")
+    software_id: str | None = None
+    software_ver: str | None = None
+    transmitter_id: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class CertRunnerRequest(BaseModel):
+    cases: list[ReturnInput]
+    save_path: str
+
+
+class CertRunnerResponse(BaseModel):
+    saved_dir: str
+    results: list[dict]
 
 
 def _compute_for_year(req: ReturnInput) -> ReturnCalc:
@@ -35,14 +71,19 @@ def _compute_for_year(req: ReturnInput) -> ReturnCalc:
     raise HTTPException(status_code=400, detail=f"Unsupported tax year {req.tax_year}")
 
 
-@app.on_event("startup")
-async def _log_startup_default_year() -> None:
-    logger.info("Tax App startup complete; default tax_year=%s", DEFAULT_TAX_YEAR)
-
-
 @app.get("/health")
 def health():
-    return {"status": "ok", "default_tax_year": DEFAULT_TAX_YEAR}
+    settings = getattr(app.state, "settings", get_settings())
+    return {
+        "status": "ok",
+        "default_tax_year": DEFAULT_TAX_YEAR,
+        "build": {
+            "version": settings.build_version,
+            "sha": settings.build_sha,
+            "efile_env": settings.efile_environment,
+            "feature_efile_xml": settings.feature_efile_xml,
+        },
+    }
 
 
 @app.post("/prepare")
@@ -54,37 +95,6 @@ def prepare(req: PrepareRequest):
     return {"ok": True, "calc": calc.model_dump()}
 
 
-class TransmitRequest(ReturnInput):
-    software_id: str
-    software_ver: str
-    transmitter_id: str
-    endpoint: str
-
-
-@app.post("/efile/transmit")
-async def efile_transmit(req: TransmitRequest):
-    issues = validate_return_input(req)
-    if issues:
-        raise HTTPException(status_code=400, detail=issues)
-    calc = _compute_for_year(req)
-    env = EfileEnvelope(req.software_id, req.software_ver, req.transmitter_id)
-    payload = build_records(env, req, calc)
-    data, digest = serialize(payload)
-    client = EfileClient(req.endpoint)
-    logger.info(
-        "Sending EFILE payload for tax_year=%s software_id=%s transmitter=%s",
-        calc.tax_year,
-        req.software_id,
-        req.transmitter_id,
-    )
-    resp = await client.send(data)
-    return {"digest": digest, "response": resp}
-
-
-class PrintRequest(ReturnInput):
-    out_path: str
-
-
 @app.post("/printout/t1")
 def print_t1(req: PrintRequest):
     calc = _compute_for_year(req)
@@ -92,52 +102,66 @@ def print_t1(req: PrintRequest):
     return {"pdf": path}
 
 
-@router.post("/tax/2024/compute")
-def compute_2024_tax(payload: dict):
-    try:
-        ti = Decimal(str(payload["taxable_income"]))
-        ni = Decimal(str(payload.get("net_income", payload["taxable_income"])))
-        credits = {
-            k: Decimal(str(v))
-            for (k, v) in (payload.get("personal_credit_amounts") or {}).items()
-        }
-    except KeyError as exc:
-        raise HTTPException(status_code=400, detail=f"Missing field: {exc}") from exc
+@app.post("/prepare/efile")
+@app.post("/efile/transmit")
+async def prepare_efile(req: TransmitRequest):
+    settings = getattr(app.state, "settings", get_settings())
+    if not settings.feature_efile_xml:
+        raise HTTPException(status_code=503, detail="EFILE XML feature flag disabled")
 
-    result = compute_full_2024(ti, ni, credits)
+    issues = validate_return_input(req)
+    if issues:
+        raise HTTPException(status_code=400, detail=issues)
+
+    calc = _compute_for_year(req)
+
+    try:
+        prepared = prepare_xml_submission(app, req, calc, endpoint_override=req.endpoint)
+    except PrefileValidationError as exc:
+        raise exc
+
+    context = pii_safe_context(req)
+    logger.info("Prepared EFILE XML payload", extra={"submission": context})
+
+    client = EfileClient(prepared.endpoint)
+    response = await client.send(prepared.xml_bytes, content_type="application/xml")
+
+    logger.info(
+        "Transmitted EFILE XML payload", extra={"submission": context, "digest": prepared.digest}
+    )
+
     return {
-        "federal_tax": str(result.federal_tax),
-        "federal_credits": str(result.federal_credits),
-        "ontario_tax": str(result.provincial_tax),
-        "ontario_credits": str(result.provincial_credits),
-        "ontario_surtax": str(result.ontario_surtax),
-        "ontario_health_premium": str(result.ontario_health_premium),
-        "total_payable": str(result.total_payable),
+        "digest": prepared.digest,
+        "envelope": {
+            "software_id": prepared.envelope.software_id,
+            "software_version": prepared.envelope.software_ver,
+            "transmitter_id": prepared.envelope.transmitter_id,
+            "environment": prepared.envelope.environment,
+        },
+        "response": response,
     }
 
 
-@router.post("/tax/2025/compute")
-def compute_2025_tax(payload: dict):
-    try:
-        ti = Decimal(str(payload["taxable_income"]))
-        ni = Decimal(str(payload.get("net_income", payload["taxable_income"])))
-        credits = {
-            k: Decimal(str(v))
-            for (k, v) in (payload.get("personal_credit_amounts") or {}).items()
-        }
-    except KeyError as exc:
-        raise HTTPException(status_code=400, detail=f"Missing field: {exc}") from exc
-
-    result = compute_full_2025(ti, ni, credits)
-    return {
-        "federal_tax": str(result.federal_tax),
-        "federal_credits": str(result.federal_credits),
-        "ontario_tax": str(result.provincial_tax),
-        "ontario_credits": str(result.provincial_credits),
-        "ontario_surtax": str(result.ontario_surtax),
-        "ontario_health_premium": str(result.ontario_health_premium),
-        "total_payable": str(result.total_payable),
-    }
+@app.post("/legacy/efile")
+async def legacy_efile(req: TransmitRequest):
+    issues = validate_return_input(req)
+    if issues:
+        raise HTTPException(status_code=400, detail=issues)
+    calc = _compute_for_year(req)
+    settings = getattr(app.state, "settings", get_settings())
+    profile = settings.profile()
+    envelope = EfileEnvelope(
+        req.software_id or profile.software_id,
+        req.software_ver or profile.software_version,
+        req.transmitter_id or profile.transmitter_id,
+        profile.environment,
+    )
+    payload = build_records(envelope, req, calc)
+    data, digest = serialize(payload)
+    endpoint = req.endpoint or profile.endpoint or "http://localhost:8000"
+    client = EfileClient(endpoint)
+    response = await client.send(data)
+    return {"digest": digest, "response": response}
 
 
 app.include_router(router)

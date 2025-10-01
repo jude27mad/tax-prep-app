@@ -1,6 +1,6 @@
 from decimal import Decimal
 from pydantic import BaseModel, Field
-from datetime import date
+from datetime import date, datetime
 
 class Taxpayer(BaseModel):
   sin: str
@@ -31,6 +31,10 @@ class ReturnInput(BaseModel):
   household: Household | None = None
   slips_t4: list[T4Slip] = Field(default_factory=list)
   rrsp_contrib: Decimal = Decimal("0.00")
+  t183_signed_ts: datetime | None = None
+  t183_ip_hash: str | None = None
+  t183_user_agent_hash: str | None = None
+  t183_pdf_path: str | None = None
   province: str = "ON"
   tax_year: int = 2025
 

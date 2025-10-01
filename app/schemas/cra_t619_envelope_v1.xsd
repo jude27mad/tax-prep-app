@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://www.cra-arc.gc.ca/xmlns/efile/t619/1.0"
+           xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t619/1.0"
+           elementFormDefault="qualified">
+  <xs:annotation>
+    <xs:documentation>Sample CRA T619 transmission envelope schema.</xs:documentation>
+  </xs:annotation>
+  <xs:element name="T619Transmission">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Environment" type="xs:string"/>
+        <xs:element name="SoftwareId" type="xs:string"/>
+        <xs:element name="SoftwareVersion" type="xs:string"/>
+        <xs:element name="TransmitterId" type="xs:string"/>
+        <xs:element name="Payload" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

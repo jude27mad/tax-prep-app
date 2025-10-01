@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://www.cra-arc.gc.ca/xmlns/efile/t183/1.0"
+           xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t183/1.0"
+           elementFormDefault="qualified">
+  <xs:annotation>
+    <xs:documentation>Sample CRA T183 electronic signature schema for testing retention flows.</xs:documentation>
+  </xs:annotation>
+  <xs:element name="T183Authorization">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="TaxpayerSINMasked" type="xs:string"/>
+        <xs:element name="SignedAt" type="xs:dateTime"/>
+        <xs:element name="ExpiresAt" type="xs:dateTime"/>
+        <xs:element name="SignatureIPAddress" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
