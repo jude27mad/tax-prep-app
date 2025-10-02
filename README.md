@@ -53,20 +53,28 @@ root-level `user_data.*`, then `inbox/*.toml|json|txt|csv`. Files like
 
 Wizard tips:
 
-- Type natural shorthand such as `57k`, `$12,345`, `yes`, or `no`; the parser
-  normalizes them.
-- Press `?` during any prompt to open contextual help or run
-  `python -m app.main help topics` for the full guide list (T4/T4A/T5 slips,
-  tuition credit, Canada Workers Benefit, RRSP advice).
-- Use `--data PATH` to run non-interactively or `--no-save` to leave
-  `user_data.toml` untouched.
+- Use `--profile NAME` to load or create a personal profile. Each profile lives
+  under `profiles/<slug>.toml` with automatic history snapshots and a trash bin
+  for restores. Manage them with `python -m app.main profiles
+  list|show|switch|rename|delete|restore`.
+- Combine `--data PATH` with profiles to preload answers from files; add
+  `--quick` to revisit only the required prompts when everything else is filled
+  in already.
+- Control colors with `--color {auto,always,never}` (or `--no-color`). If Rich
+  is installed the wizard renders tables; otherwise it falls back to plain
+  text.
+- Type `?` at any prompt for contextual help or run `python -m app.main help
+  topics` for the full guide list (T4/T4A/T5 slips, tuition credit, Canada
+  Workers Benefit, RRSP advice).
 - Run `python -m app.main checklist` to generate the document checklist
   tailored to your answers.
-- After the summary, changes are diffed and saved back to `user_data.toml` so
-  the next run starts with your latest inputs.
+- After the review screen you get a diff of all changes. Profiles save
+  automatically unless you pass `--no-save`; without a profile the wizard
+  still updates `user_data.toml` for backwards compatibility.
 
-`user_data.toml` ships with sample values; edit it or drop files into
-`inbox/` (see `inbox/README.txt`) to preload your own slips.
+`user_data.toml` remains available for quick runs or CI. Copy
+`user_data.example.toml` or drop files into `inbox/` (see `inbox/README.txt`)
+when you are not using profiles.
 
 ## Running the APIs
 

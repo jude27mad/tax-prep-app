@@ -1,12 +1,25 @@
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 import textwrap
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
+
+try:
+    from rich.console import Console  # type: ignore[import-not-found]
+    from rich.panel import Panel  # type: ignore[import-not-found]
+    from rich.table import Table  # type: ignore[import-not-found]
+    from rich.text import Text  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - optional dependency
+    Console = None  # type: ignore[assignment]
+    Panel = None  # type: ignore[assignment]
+    Table = None  # type: ignore[assignment]
+    Text = None  # type: ignore[assignment]
 
 try:
     import tomllib  # Python 3.11+
@@ -242,6 +255,10 @@ def estimate_from_t4(payload: T4EstimateRequest):
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 INBOX_DIR = BASE_DIR / "inbox"
+PROFILES_DIR = BASE_DIR / "profiles"
+PROFILE_HISTORY_DIR = PROFILES_DIR / "history"
+PROFILE_TRASH_DIR = PROFILES_DIR / ".trash"
+DEFAULT_PROFILE_FILE = PROFILES_DIR / "active_profile.txt"
 
 CLI_SUBMIT_FIELDS = {"box14", "box22", "box16", "box16a", "box18", "rrsp", "province"}
 CLI_NUMERIC_FIELDS = {"box14", "box22", "box16", "box16a", "box18", "rrsp"}
@@ -265,6 +282,257 @@ CLI_SAVE_ORDER = [
 class PromptStep(TypedDict):
     field: str
     required: NotRequired[bool]
+
+
+class ImportPreview(TypedDict, total=False):
+    mapping: list[tuple[str, str]]
+    unknown: list[str]
+    source: str
+
+
+ColorPreference = Literal["auto", "always", "never"]
+
+
+def _slugify(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return cleaned or "profile"
+
+
+def _ensure_profiles_dirs() -> None:
+    for directory in (PROFILES_DIR, PROFILE_HISTORY_DIR, PROFILE_TRASH_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def _profile_path(slug: str) -> Path:
+    return PROFILES_DIR / f"{slug}.toml"
+
+
+def _history_dir(slug: str) -> Path:
+    return PROFILE_HISTORY_DIR / slug
+
+
+def _load_profile(slug: str | None) -> tuple[dict[str, Any], Path | None, list[str]]:
+    if not slug:
+        return {}, None, []
+    _ensure_profiles_dirs()
+    path = _profile_path(slug)
+    if not path.exists():
+        return {}, None, []
+    errors: list[str] = []
+    try:
+        with path.open("rb") as handle:
+            raw = tomllib.load(handle)
+    except Exception as exc:  # pragma: no cover - corrupt file
+        errors.append(f"{path.name}: {exc}")
+        return {}, path, errors
+    try:
+        data = _canonicalize_data(raw)
+    except ValueError as exc:
+        errors.append(f"{path.name}: {exc}")
+        data = {}
+    return data, path, errors
+
+
+def _snapshot_profile(slug: str, path: Path) -> None:
+    if not path.exists():
+        return
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    history_dir = _history_dir(slug)
+    history_dir.mkdir(parents=True, exist_ok=True)
+    snapshot = history_dir / f"{timestamp}.toml"
+    snapshot.write_bytes(path.read_bytes())
+
+
+def _trash_profile(slug: str, path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    _ensure_profiles_dirs()
+    PROFILE_TRASH_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    dest = PROFILE_TRASH_DIR / f"{slug}-{timestamp}.toml"
+    path.replace(dest)
+    return dest
+
+
+def _list_profiles() -> list[str]:
+    if not PROFILES_DIR.exists():
+        return []
+    return sorted(p.stem for p in PROFILES_DIR.glob("*.toml") if p.is_file())
+
+
+def _list_trash(slug: str | None = None) -> list[Path]:
+    if not PROFILE_TRASH_DIR.exists():
+        return []
+    files = [p for p in PROFILE_TRASH_DIR.glob("*.toml") if p.is_file()]
+    if slug:
+        prefix = f"{slug}-"
+        files = [p for p in files if p.name.startswith(prefix)]
+    return sorted(files)
+
+
+def _set_active_profile(slug: str | None) -> None:
+    _ensure_profiles_dirs()
+    if slug is None:
+        if DEFAULT_PROFILE_FILE.exists():
+            DEFAULT_PROFILE_FILE.unlink()
+        return
+    DEFAULT_PROFILE_FILE.write_text(slug + "\n", encoding="utf-8")
+
+
+def _get_active_profile() -> str | None:
+    if DEFAULT_PROFILE_FILE.exists():
+        content = DEFAULT_PROFILE_FILE.read_text(encoding="utf-8").strip()
+        return content or None
+    return None
+
+
+def _save_profile_data(slug: str, data: dict[str, Any]) -> Path:
+    _ensure_profiles_dirs()
+    path = _profile_path(slug)
+    if path.exists():
+        _snapshot_profile(slug, path)
+    _save_user_data(data, path)
+    _set_active_profile(slug)
+    return path
+
+
+def _delete_profile(slug: str) -> Path | None:
+    path = _profile_path(slug)
+    if not path.exists():
+        return None
+    trashed = _trash_profile(slug, path)
+    if _get_active_profile() == slug:
+        _set_active_profile(None)
+    return trashed
+
+
+def _restore_profile(slug: str) -> Path | None:
+    candidates = _list_trash(slug)
+    if not candidates:
+        return None
+    candidate = candidates[-1]
+    _ensure_profiles_dirs()
+    dest = _profile_path(slug)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(candidate.read_bytes())
+    candidate.unlink()
+    return dest
+
+
+def _rename_profile(slug: str, new_slug: str) -> tuple[Path | None, Path | None]:
+    if slug == new_slug:
+        return _profile_path(slug), None
+    old_path = _profile_path(slug)
+    if not old_path.exists():
+        return None, None
+    new_path = _profile_path(new_slug)
+    if new_path.exists():
+        raise ValueError(f"Profile '{new_slug}' already exists.")
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    new_path.write_bytes(old_path.read_bytes())
+    old_path.unlink()
+    old_history = _history_dir(slug)
+    new_history = _history_dir(new_slug)
+    if old_history.exists():
+        new_history.parent.mkdir(parents=True, exist_ok=True)
+        if new_history.exists():
+            for item in old_history.glob('*'):
+                target = new_history / item.name
+                target.write_bytes(item.read_bytes())
+                item.unlink()
+            old_history.rmdir()
+        else:
+            old_history.rename(new_history)
+    if _get_active_profile() == slug:
+        _set_active_profile(new_slug)
+    return new_path, new_history
+
+
+def _resolve_color_preference(pref: ColorPreference) -> ColorPreference:
+    if pref == "auto" and os.getenv("NO_COLOR"):
+        return "never"
+    return pref
+
+
+def _get_console(pref: ColorPreference):
+    if Console is None:
+        return None
+    resolved = _resolve_color_preference(pref)
+    if resolved == "never":
+        return None
+    force_terminal = resolved == "always"
+    try:
+        return Console(force_terminal=force_terminal)
+    except Exception:  # pragma: no cover - console init failure
+        return None
+
+def _console_print(console, message: str) -> None:
+    if console is not None:
+        console.print(message)
+    else:
+        print(message)
+
+
+def _build_table(title: str, columns: list[str]) -> Table | None:
+    if Table is None:
+        return None
+    table = Table(title=title, expand=False)
+    for column in columns:
+        table.add_column(column)
+    return table
+
+
+def _print_import_preview(preview: ImportPreview | None, console) -> None:
+    if not preview:
+        return
+    mapping = preview.get("mapping") or []
+    unknown = preview.get("unknown") or []
+    if not mapping and not unknown:
+        return
+    if Table is not None and console is not None:
+        table = _build_table("Imported fields", ["source", "field"])
+        if table is not None:
+            for source, field in mapping:
+                table.add_row(source, field)
+            if unknown:
+                table.add_section()
+                for item in unknown:
+                    table.add_row(item, "? (unrecognized)")
+            console.print(table)
+            return
+    if mapping:
+        print("Imported fields:")
+        for source, field in mapping:
+            print(f"  - {source} -> {field}")
+    if unknown:
+        print("Ignored entries:")
+        for item in unknown:
+            print(f"  - {item}")
+
+
+def _print_changes_summary(before: dict[str, Any], after: dict[str, Any], console) -> None:
+    keys = [key for key in CLI_SAVE_ORDER if key in before or key in after]
+    changes = []
+    for key in keys:
+        if before.get(key) != after.get(key):
+            changes.append((key, before.get(key), after.get(key)))
+    if not changes:
+        if before:
+            _console_print(console, "\nNo changes from the saved answers.")
+        return
+    if Table is not None and console is not None:
+        table = _build_table("Updated answers", ["field", "before", "after"])
+        if table is not None:
+            for key, old, new in changes:
+                table.add_row(key, _display_value(key, old) or "<empty>", _display_value(key, new) or "<empty>")
+            console.print(table)
+            return
+    _console_print(console, "\nUpdated answers:")
+    for key, old, new in changes:
+        before_text = _display_value(key, old) or "<empty>"
+        after_text = _display_value(key, new) or "<empty>"
+        _console_print(console, f"  - {key}: {before_text} -> {after_text}")
+
 
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "full_name": ("full name", "name", "legal name", "taxpayer name"),
@@ -607,18 +875,20 @@ def _canonical_key(raw: str) -> str | None:
     return _ALIAS_LOOKUP.get(normalized)
 
 
-def _canonicalize_data(raw: Any) -> dict[str, Any]:
+def _canonicalize_with_metadata(raw: Any) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
     if not isinstance(raw, dict):
-        return {}
+        return {}, [], []
     flattened = dict(raw)
-    # Common pattern: {"t4": {...}}
     t4_block = flattened.get("t4")
     if isinstance(t4_block, dict):
         flattened = {**flattened, **t4_block}
     result: dict[str, Any] = {}
+    mapping: list[tuple[str, str]] = []
+    unknown: list[str] = []
     for key, value in flattened.items():
         canonical = _canonical_key(str(key))
         if not canonical:
+            unknown.append(str(key))
             continue
         try:
             coerced = _coerce_for_field(canonical, value)
@@ -626,11 +896,20 @@ def _canonicalize_data(raw: Any) -> dict[str, Any]:
             raise ValueError(f"Field '{key}': {exc}") from exc
         if coerced is not None:
             result[canonical] = coerced
-    return result
+            mapping.append((str(key), canonical))
+    return result, mapping, unknown
 
 
-def _parse_freeform_text(text: str) -> dict[str, Any]:
+
+def _canonicalize_data(raw: Any) -> dict[str, Any]:
+    data, _, _ = _canonicalize_with_metadata(raw)
+    return data
+
+
+def _parse_freeform_text(text: str) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
     result: dict[str, Any] = {}
+    mapping: list[tuple[str, str]] = []
+    unknown: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -641,45 +920,66 @@ def _parse_freeform_text(text: str) -> dict[str, Any]:
             canonical = _canonical_key(raw_key)
             if canonical:
                 result[canonical] = _coerce_for_field(canonical, raw_value.strip())
+                mapping.append((raw_key.strip(), canonical))
+            else:
+                unknown.append(raw_key.strip())
             continue
         lowered = " ".join(line.lower().split())
+        matched = False
         for alias, canonical in _ALIAS_MATCHERS:
             if lowered.startswith(alias):
                 remainder = line[len(alias):].lstrip(" :=-")
                 if not remainder:
                     continue
                 result[canonical] = _coerce_for_field(canonical, remainder.strip())
+                mapping.append((alias, canonical))
+                matched = True
                 break
-    return result
+        if not matched:
+            unknown.append(line)
+    return result, mapping, unknown
 
 
-def _read_data_file(path: Path) -> dict[str, Any]:
+def _read_data_file(path: Path) -> tuple[dict[str, Any], ImportPreview]:
     suffix = path.suffix.lower()
+    preview: ImportPreview = {"mapping": [], "unknown": [], "source": _friendly_path(path)}
     try:
         if suffix == ".toml":
             with path.open("rb") as handle:
                 raw = tomllib.load(handle)
-            return _canonicalize_data(raw)
+            data, mapping, unknown = _canonicalize_with_metadata(raw)
+            preview["mapping"] = mapping
+            preview["unknown"] = unknown
+            return data, preview
         if suffix == ".json":
             with path.open(encoding="utf-8") as handle:
                 raw = json.load(handle)
-            return _canonicalize_data(raw)
+            data, mapping, unknown = _canonicalize_with_metadata(raw)
+            preview["mapping"] = mapping
+            preview["unknown"] = unknown
+            return data, preview
         if suffix == ".txt":
-            text = path.read_text(encoding="utf-8")
-            return _parse_freeform_text(text)
+            text_content = path.read_text(encoding="utf-8")
+            data, mapping, unknown = _parse_freeform_text(text_content)
+            preview["mapping"] = mapping
+            preview["unknown"] = unknown
+            return data, preview
         if suffix == ".csv":
             with path.open(encoding="utf-8", newline="") as handle:
                 reader = csv.DictReader(handle)
                 try:
                     row = next(reader)
                 except StopIteration:
-                    return {}
-            return _canonicalize_data(row)
+                    return {}, preview
+            data, mapping, unknown = _canonicalize_with_metadata(row)
+            preview["mapping"] = mapping
+            preview["unknown"] = unknown
+            return data, preview
     except ValueError as exc:
         raise ValueError(f"{path.name}: {exc}") from exc
     except Exception as exc:  # pragma: no cover - defensive catch for file decoding issues
         raise ValueError(f"{path.name}: {exc}") from exc
-    return {}
+    return {}, preview
 
 
 def _default_candidate_paths() -> tuple[list[Path], list[Path]]:
@@ -709,7 +1009,7 @@ def _default_candidate_paths() -> tuple[list[Path], list[Path]]:
     return unique_supported, unsupported
 
 
-def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, list[Path], list[str]]:
+def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, list[Path], list[str], ImportPreview | None]:
     errors: list[str] = []
     unsupported: list[Path] = []
     candidates: list[Path] = []
@@ -723,68 +1023,126 @@ def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, l
         candidates, unsupported = _default_candidate_paths()
     for candidate in candidates:
         try:
-            data = _read_data_file(candidate)
+            data, preview = _read_data_file(candidate)
         except ValueError as exc:
             errors.append(str(exc))
             continue
         if data:
-            return data, candidate, unsupported, errors
-    return {}, None, unsupported, errors
+            return data, candidate, unsupported, errors, preview
+    return {}, None, unsupported, errors, None
 
 
-def _prompt_for_missing_fields(data: dict[str, Any]) -> dict[str, Any]:
+def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, console=None) -> dict[str, Any]:
     working = {key: _coerce_for_field(key, value) for key, value in data.items()}
-    required_steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
-    steps_to_run = [
-        meta
-        for meta in required_steps
-        if bool(meta.get("required", False)) or not _has_value(working.get(meta["field"]))
-    ]
-    total = len(steps_to_run)
-    if total == 0:
+    steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
+    if quick:
+        steps = [meta for meta in steps if meta.get("required", False)]
+    else:
+        steps = [
+            meta
+            for meta in steps
+            if meta.get("required", False) or not _has_value(working.get(meta["field"]))
+        ]
+    if not steps:
         return working
-    for index, meta in enumerate(steps_to_run, start=1):
+    index = 0
+    total = len(steps)
+    while index < total:
+        meta = steps[index]
         field = meta["field"]
         required = bool(meta.get("required", False))
         current = working.get(field)
-        value = _ask_field(field, current, index, total, required)
-        if value is None and required:
+        action, value = _ask_field(field, current, index + 1, total, required, console)
+        if action == "back":
+            if index > 0:
+                index -= 1
+            else:
+                _console_print(console, "Already at the first question; cannot go back.")
+            continue
+        if action == "skip":
+            index += 1
+            continue
+        if action == "repeat":
             continue
         working[field] = value
+        index += 1
     return working
 
 
-def _ask_field(field: str, current: Any, step: int, total: int, required: bool) -> Any:
+
+def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) -> tuple[dict[str, Any] | None, bool]:
+    """Return (final_answers, restart_requested)."""
+    while True:
+        if Table is not None and console is not None:
+            table = _build_table("Review answers", ["field", "value"])
+            if table is not None:
+                for key in CLI_SAVE_ORDER:
+                    if key in answers:
+                        table.add_row(key, _display_value(key, answers.get(key)))
+                console.print(table)
+        else:
+            _console_print(console, "\nReview your answers:")
+            for key in CLI_SAVE_ORDER:
+                if key in answers:
+                    _console_print(console, f"  - {key}: {_display_value(key, answers.get(key))}")
+        cmd = input("Review command ([Enter]=accept, field name to edit, 'restart'): ").strip()
+        lowered = cmd.lower()
+        if lowered in {"", "accept", "done"}:
+            return answers, False
+        if lowered == "restart":
+            return None, True
+        canonical = _canonical_key(lowered) if lowered else None
+        field = canonical or lowered
+        if field in _FIELD_METADATA:
+            meta = _FIELD_METADATA[field]
+            required = bool(meta.get("required", False))
+            current = answers.get(field)
+            action, value = _ask_field(field, current, 1, 1, required, console)
+            if action == "set":
+                answers[field] = value
+            elif action == "skip":
+                answers.pop(field, None)
+            continue
+        _console_print(console, "  Command not recognized. Try a field name, 'restart', or Enter to accept.")
+
+
+def _ask_field(field: str, current: Any, step: int, total: int, required: bool, console) -> tuple[str, Any]:
     meta = _FIELD_METADATA[field]
     label = meta["label"]
     hint = meta.get("hint")
     default = meta.get("default")
-    print(f"\n[{step}/{total}] {label}")
+    _console_print(console, f"\n[{step}/{total}] {label}")
     if hint:
-        print(f"  {hint}")
+        _console_print(console, f"  {hint}")
     if _has_value(current):
-        print(f"  Current value: {_display_value(field, current)}")
+        _console_print(console, f"  Current value: {_display_value(field, current)}")
     if default is not None and not _has_value(current):
-        print(f"  Default: {_display_value(field, default)}")
+        _console_print(console, f"  Default: {_display_value(field, default)}")
     prompt = "  -> "
     while True:
         raw = input(prompt).strip()
-        if raw == "?":
+        lowered = raw.lower()
+        if lowered in {"?", "help"}:
             _print_help_topic(meta.get("help_topic", field))
             continue
+        if lowered in {"back", "<"}:
+            return "back", current
+        if lowered in {"skip", "s"} and not required:
+            return "skip", current
         if not raw:
             if _has_value(current):
-                return current
+                return "set", current
             if default is not None:
-                return _coerce_for_field(field, default)
+                return "set", _coerce_for_field(field, default)
             if not required:
-                return None
-            print("  This field is required. Please enter a value or type ? for help.")
+                return "set", None
+            _console_print(console, "  This field is required. Please enter a value or type ? for help.")
             continue
         try:
-            return _coerce_for_field(field, raw)
+            return "set", _coerce_for_field(field, raw)
         except ValueError as exc:
-            print(f"  {exc}")
+            _console_print(console, f"  {exc}")
+            return "repeat", current
 
 
 def _print_help_topic(topic: str | None) -> None:
@@ -831,21 +1189,8 @@ def _format_currency(value: float | Decimal) -> str:
     return f"${_round_cents(value):,.2f}"
 
 
-def _summarize_changes(before: dict[str, Any], after: dict[str, Any]) -> None:
-    keys = [key for key in CLI_SAVE_ORDER if key in before or key in after]
-    changes = []
-    for key in keys:
-        if before.get(key) != after.get(key):
-            changes.append((key, before.get(key), after.get(key)))
-    if not changes:
-        if before:
-            print("\nNo changes from the saved answers.")
-        return
-    print("\nUpdated answers:")
-    for key, old, new in changes:
-        before_text = _display_value(key, old) or "<empty>"
-        after_text = _display_value(key, new) or "<empty>"
-        print(f"  - {key}: {before_text} -> {after_text}")
+def _summarize_changes(before: dict[str, Any], after: dict[str, Any], console) -> None:
+    _print_changes_summary(before, after, console)
 
 
 def _save_user_data(data: dict[str, Any], path: Path) -> None:
@@ -866,66 +1211,206 @@ def _save_user_data(data: dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nSaved your answers to {_friendly_path(path)}")
 
+def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) -> None:
+    action = (subargs[0].lower() if subargs else "list")
+    args = subargs[1:] if subargs else []
+    active = _get_active_profile()
+    if action == "list":
+        profiles = _list_profiles()
+        if not profiles:
+            _console_print(console, "No profiles found. Run the wizard with --profile to create one.")
+            return
+        _console_print(console, "Profiles:")
+        for slug in profiles:
+            marker = "*" if slug == active else "-"
+            _console_print(console, f"  {marker} {slug}")
+        return
+    if action == "show":
+        target = args[0] if args else explicit_profile or active
+        if not target:
+            _console_print(console, "Specify a profile name to show.")
+            return
+        slug = _slugify(target)
+        data, _, errors = _load_profile(slug)
+        if errors:
+            for message in errors:
+                _console_print(console, f"ERROR: {message}")
+            return
+        if not data:
+            _console_print(console, "Profile is empty or not found.")
+            return
+        if Table is not None and console is not None:
+            table = _build_table(f"Profile {slug}", ["field", "value"])
+            if table is not None:
+                for key in CLI_SAVE_ORDER:
+                    if key in data:
+                        table.add_row(key, _display_value(key, data[key]))
+                console.print(table)
+                return
+        for key in CLI_SAVE_ORDER:
+            if key in data:
+                print(f"{key}: {_display_value(key, data[key])}")
+        return
+    if action in {"switch", "set"}:
+        if not args:
+            _console_print(console, "Provide a profile name to switch to.")
+            return
+        slug = _slugify(args[0])
+        data, path_obj, errors = _load_profile(slug)
+        if errors:
+            for message in errors:
+                _console_print(console, f"ERROR: {message}")
+            return
+        if not path_obj:
+            _console_print(console, f"Profile '{slug}' does not exist yet. Run the wizard with --profile {slug} to create it.")
+            return
+        _set_active_profile(slug)
+        _console_print(console, f"Active profile set to '{slug}'.")
+        return
+    if action == "delete":
+        if not args:
+            _console_print(console, "Provide a profile name to delete.")
+            return
+        slug = _slugify(args[0])
+        trashed = _delete_profile(slug)
+        if trashed:
+            _console_print(console, f"Moved profile '{slug}' to trash: {_friendly_path(trashed)}")
+        else:
+            _console_print(console, f"Profile '{slug}' not found.")
+        return
+    if action == "restore":
+        if not args:
+            _console_print(console, "Provide a profile name to restore.")
+            return
+        slug = _slugify(args[0])
+        restored = _restore_profile(slug)
+        if restored:
+            _console_print(console, f"Restored profile '{slug}' from trash.")
+        else:
+            _console_print(console, f"No trashed profile found for '{slug}'.")
+        return
+    if action == "rename":
+        if len(args) < 2:
+            _console_print(console, "Usage: profiles rename <old> <new>.")
+            return
+        old_slug = _slugify(args[0])
+        new_slug = _slugify(args[1])
+        try:
+            _rename_profile(old_slug, new_slug)
+        except ValueError as exc:
+            _console_print(console, f"ERROR: {exc}")
+            return
+        _console_print(console, f"Renamed profile '{old_slug}' to '{new_slug}'.")
+        return
+    _console_print(console, "Unknown profiles command. Available: list, show, switch, delete, restore, rename.")
 
-def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any]) -> None:
-    print("\nSummary:")
-    print("--------")
-    print(f"Employment income (box 14): {_format_currency(payload.box14)}")
-    print(f"Tax withheld (box 22): {_format_currency(payload.box22)}")
-    print(f"CPP reported (box 16): {_format_currency(payload.box16)} — status: {outcome['cpp']['status']}")
-    print(f"CPP2 reported (box 16A): {_format_currency(payload.box16a)} — status: {outcome['cpp2']['status']}")
-    print(f"EI premiums (box 18): {_format_currency(payload.box18)} — status: {outcome['ei']['status']}")
-    print(f"RRSP deduction: {_format_currency(payload.rrsp)}")
-    print(f"Province: {payload.province}")
-    print(
-        f"Federal tax after credits: {_format_currency(outcome['tax']['federal']['after_credits'])}"
-    )
-    print(
-        f"Ontario tax (after surtax/premium): {_format_currency(outcome['tax']['ontario']['net_provincial'])}"
-    )
-    print(f"Total tax owing: {_format_currency(outcome['total_tax'])}")
-    print(f"Withholding applied: {_format_currency(outcome['withholding'])}")
+
+
+
+def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console) -> None:
+    rows = [
+        ("Employment income (box 14)", _format_currency(payload.box14), ""),
+        ("Tax withheld (box 22)", _format_currency(payload.box22), ""),
+        ("CPP reported (box 16)", _format_currency(payload.box16), outcome["cpp"]["status"]),
+        ("CPP2 reported (box 16A)", _format_currency(payload.box16a), outcome["cpp2"]["status"]),
+        ("EI premiums (box 18)", _format_currency(payload.box18), outcome["ei"]["status"]),
+        ("RRSP deduction", _format_currency(payload.rrsp), ""),
+        ("Province", payload.province, ""),
+        ("Federal tax after credits", _format_currency(outcome["tax"]["federal"]["after_credits"]), ""),
+        ("Ontario tax (after surtax/premium)", _format_currency(outcome["tax"]["ontario"]["net_provincial"]), ""),
+        ("Total tax owing", _format_currency(outcome["total_tax"]), ""),
+        ("Withholding applied", _format_currency(outcome["withholding"]), ""),
+    ]
     balance = outcome["balance"]
     if outcome.get("is_refund"):
-        print(f"Expected refund: {_format_currency(abs(balance))}")
+        rows.append(("Expected refund", _format_currency(abs(balance)), ""))
     elif balance > 0:
-        print(f"Balance owing: {_format_currency(balance)}")
+        rows.append(("Balance owing", _format_currency(balance), ""))
     else:
-        print("No balance owing or refund detected.")
+        rows.append(("Balance status", "No balance owing or refund detected.", ""))
+    if Table is not None and console is not None:
+        table = _build_table("Summary", ["Metric", "Value", "Status"])
+        if table is not None:
+            for metric, value, status in rows:
+                table.add_row(metric, value, status)
+            console.print(table)
+            return
+    _console_print(console, "\nSummary:")
+    _console_print(console, "--------")
+    for metric, value, status in rows:
+        line = f"{metric}: {value}"
+        if status:
+            line += f" - status: {status}"
+        _console_print(console, line)
 
 
-def _run_wizard(data_path: str | None, allow_save: bool) -> None:
-    original, source, unsupported, errors = _load_inputs(data_path)
-    print("\nTax App guided mode")
-    print("===================")
+
+def _run_wizard(
+    data_path: str | None,
+    *,
+    allow_save: bool,
+    profile_slug: str | None,
+    profile_data: dict[str, Any],
+    profile_errors: list[str],
+    quick: bool,
+    console,
+) -> None:
+    if profile_errors:
+        for message in profile_errors:
+            _console_print(console, f"NOTE: {message}")
+    file_data, source, unsupported, errors, preview = _load_inputs(data_path)
+    _console_print(console, "Tax App guided mode")
+    _console_print(console, "===================")
     if errors:
         for message in errors:
-            print(f"NOTE: {message}")
+            _console_print(console, f"NOTE: {message}")
+    if profile_slug:
+        _console_print(console, f"Using profile: {profile_slug}")
     if source:
-        print(f"Loaded saved answers from {_friendly_path(source)}")
-    else:
-        print("No saved answers found; we will collect everything now.")
+        _console_print(console, f"Loaded saved answers from {_friendly_path(source)}")
+    elif not profile_data:
+        _console_print(console, "No saved answers found; we will collect everything now.")
+    if preview:
+        _print_import_preview(preview, console)
     if unsupported:
-        print("Files in inbox/ that could not be imported automatically (open them and type the values):")
+        _console_print(
+            console,
+            "Files in inbox/ that could not be imported automatically (open them and type the values):",
+        )
         for item in unsupported:
-            print(f"  - {_friendly_path(item)}")
-    answers = _prompt_for_missing_fields(original)
+            _console_print(console, f"  - {_friendly_path(item)}")
+    combined = {**profile_data, **file_data}
+    starting = combined.copy()
+    while True:
+        answers = _prompt_for_missing_fields(starting.copy(), quick=quick, console=console)
+        reviewed, restart = _review_answers(starting, answers, console)
+        if restart:
+            quick = False
+            continue
+        if reviewed is not None:
+            answers = reviewed
+            break
     payload_data = {key: value for key, value in answers.items() if key in CLI_SUBMIT_FIELDS and value is not None}
     try:
         payload = T4EstimateRequest.model_validate(payload_data)
     except ValidationError as exc:
-        print("\nThere was a problem with the answers provided:")
+        _console_print(console, "There was a problem with the answers provided:")
         for error in exc.errors():
             location = " -> ".join(str(part) for part in error.get("loc", ("value",)))
-            print(f"  - {location}: {error.get('msg')}")
+            _console_print(console, f"  - {location}: {error.get('msg')}")
         sys.exit(1)
     result = estimate_from_t4(payload)
-    _print_summary(payload, result)
-    _summarize_changes(original, answers)
-    if allow_save:
-        _save_user_data(answers, BASE_DIR / "user_data.toml")
+    _print_summary(payload, result, console)
+    _print_changes_summary(starting, answers, console)
+    if not allow_save:
+        _console_print(console, "Skipped saving because --no-save was used.")
+        return
+    if profile_slug:
+        _save_profile_data(profile_slug, answers)
+        _console_print(console, f"Saved answers to profile '{profile_slug}'.")
     else:
-        print("\nSkipped saving because --no-save was used.")
+        path = BASE_DIR / "user_data.toml"
+        _save_user_data(answers, path)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -933,24 +1418,64 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="tax-app",
         description="Guided assistant for the Tax App T4 estimator.",
     )
-    parser.add_argument("command", nargs="?", default="wizard", choices=["wizard", "help", "checklist"], help="Action to perform.")
-    parser.add_argument("topic", nargs="?", help="Help topic or (for checklist) focus area.")
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="wizard",
+        choices=["wizard", "help", "checklist", "profiles"],
+        help="Action to perform.",
+    )
+    parser.add_argument("subargs", nargs="*", help="Additional arguments for the chosen command.")
     parser.add_argument("--data", help="Path to a TOML/JSON/CSV/TXT file with answers.")
-    parser.add_argument("--no-save", action="store_true", help="Do not update user_data.toml after running.")
+    parser.add_argument("--profile", help="Profile name to load/save answers for.")
+    parser.add_argument("--quick", action="store_true", help="Prompt only for required fields when possible.")
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Color output preference (default: auto).",
+    )
+    parser.add_argument(
+        "--no-color",
+        dest="color",
+        action="store_const",
+        const="never",
+        help="Alias for --color never.",
+    )
+    parser.add_argument("--no-save", action="store_true", help="Do not persist answers after running.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
+    console = _get_console(args.color)
     if args.command == "help":
-        _print_help_topic(args.topic)
+        topic = args.subargs[0] if args.subargs else None
+        _print_help_topic(topic)
         return
     if args.command == "checklist":
-        data, _, _, _ = _load_inputs(args.data)
+        data, _, _, _, _ = _load_inputs(args.data)
         _print_checklist(data)
         return
-    _run_wizard(args.data, allow_save=not args.no_save)
+    if args.command == "profiles":
+        _handle_profiles(args.subargs, args.profile, console)
+        return
+    profile_slug = _slugify(args.profile) if args.profile else _get_active_profile()
+    profile_data, _, profile_errors = _load_profile(profile_slug)
+    if profile_slug and not profile_data and not profile_errors:
+        _console_print(console, f"Profile '{profile_slug}' does not exist yet; it will be created when you save.")
+    _run_wizard(
+        args.data,
+        allow_save=not args.no_save,
+        profile_slug=profile_slug,
+        profile_data=profile_data,
+        profile_errors=profile_errors,
+        quick=args.quick,
+        console=console,
+    )
+
 
 
 if __name__ == "__main__":
     main()
+
