@@ -32,6 +32,18 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Guided wizard (no JSON typing)
+
+The estimator now includes a prompt-driven CLI so you can answer questions without worrying about Python syntax or JSON formatting.
+
+```bash
+python -m app.main           # start the wizard (auto-saves answers)
+python -m app.main help box14
+python -m app.main checklist
+```
+
+Drop plain-text notes or CSV exports into `inbox/`, or copy `user_data.example.toml` to `user_data.toml` to preload answers. During the wizard you can type `?` at any prompt to open the matching help topic.
+
 ## Running the APIs
 
 Open separate terminals for each API (activate `.venv` in both).
@@ -100,3 +112,4 @@ Golden XML fixtures live in `tests/golden/`; fuzz tests rely on Hypothesis.
 ---
 
 Need help? See the interactive docs (`/docs`) or open `tests/unit/` for examples.
+

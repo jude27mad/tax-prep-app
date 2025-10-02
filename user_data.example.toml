@@ -1,0 +1,9 @@
+# Sample answers for the guided wizard. Copy to user_data.toml to reuse.
+full_name = "Jane Doe"
+province = "ON"
+box14 = 72000.00
+box22 = 12500.00
+box16 = 3740.00
+box16a = 0.00
+box18 = 1078.00
+rrsp = 2500.00
