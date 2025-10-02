@@ -14,3 +14,4 @@ artifacts/
 
 tests/.tmp_*/
 .hypothesis/
+profiles/
