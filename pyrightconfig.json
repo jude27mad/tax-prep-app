@@ -1,0 +1,13 @@
+{
+  "include": ["app", "scripts", "tests"],
+  "exclude": [
+    ".hypothesis",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".venv",
+    "logs"
+  ],
+  "ignore": [
+    "**/.hypothesis/**"
+  ]
+}

@@ -6,12 +6,12 @@ import sys
 import textwrap
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -261,6 +261,11 @@ CLI_SAVE_ORDER = [
     "num_dependents",
 ]
 
+
+class PromptStep(TypedDict):
+    field: str
+    required: NotRequired[bool]
+
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "full_name": ("full name", "name", "legal name", "taxpayer name"),
     "province": ("province", "province code", "province of residence", "prov", "residence province"),
@@ -454,7 +459,7 @@ _CHECKLIST_BASE = [
     "Notices of Assessment from previous years (for RRSP room reference).",
 ]
 
-_WIZARD_SEQUENCE = [
+_WIZARD_SEQUENCE: list[PromptStep] = [
     {"field": "full_name", "required": False},
     {"field": "province", "required": False},
     {"field": "box14", "required": True},
@@ -730,13 +735,17 @@ def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, l
 def _prompt_for_missing_fields(data: dict[str, Any]) -> dict[str, Any]:
     working = {key: _coerce_for_field(key, value) for key, value in data.items()}
     required_steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
-    steps_to_run = [meta for meta in required_steps if meta.get("required") or not _has_value(working.get(meta["field"]))]
+    steps_to_run = [
+        meta
+        for meta in required_steps
+        if bool(meta.get("required", False)) or not _has_value(working.get(meta["field"]))
+    ]
     total = len(steps_to_run)
     if total == 0:
         return working
     for index, meta in enumerate(steps_to_run, start=1):
         field = meta["field"]
-        required = bool(meta.get("required"))
+        required = bool(meta.get("required", False))
         current = working.get(field)
         value = _ask_field(field, current, index, total, required)
         if value is None and required:

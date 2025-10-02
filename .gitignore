@@ -13,3 +13,4 @@ logs/
 artifacts/
 
 tests/.tmp_*/
+.hypothesis/
