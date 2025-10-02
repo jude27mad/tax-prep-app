@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\app\core\validate\pre_submit.py
+# hypothesis_version: 6.140.2
+
+[2024, 2025, '%Y-%m-%d', '0', '10001', '10002', '10003', '10004', '10005', '10006', '20001', '30010', '50010', '50011', 'A1A1A1', 'AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT', 'address', 'dob', 'error', 'invalid_postal_code', 'invalid_province', 'invalid_sin', 'missing_address', 'name', 'postal_code', 'province', 'sin', 't183', 't183_ip_hash', 't183_signed_ts', 't183_user_agent_hash', 'tax_year', 'taxable_income', 'unsupported_year']

@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\app\api\http.py
+# hypothesis_version: 6.140.2
+
+[400, 502, 503, 2024, 2025, '/efile/transmit', '/health', '/legacy/efile', '/prepare', '/prepare/efile', '/printout/t1', 'EFILE circuit open', 'Tax Preparer App', 'application/xml', 'build', 'calc', 'default_tax_year', 'digest', 'efile_env', 'endpoint', 'envelope', 'environment', 'error', 'feature_efile_xml', 'forbid', 'issues', 'last_sbmt_ref_id', 'ok', 'pdf', 'preparer', 'response', 'sbmt_ref_id', 'sbmt_ref_id_last', 'schema_versions', 'schemas', 'settings', 'sha', 'software_id', 'software_version', 'status', 'submission', 'tax_app', 'transmitter_id', 'version']

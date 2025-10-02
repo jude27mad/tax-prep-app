@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\scripts\coverage_gate.py
+# hypothesis_version: 6.140.2
+
+[0.0, 85.0, 100, '--minimum', '__main__', 'coverage_xml', 'line-rate']

@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\app\efile\records.py
+# hypothesis_version: 6.140.2
+
+['env', 'environment', 'line_items', 'province', 'return', 'software_id', 'software_ver', 'totals', 'transmitter_id', 'year']

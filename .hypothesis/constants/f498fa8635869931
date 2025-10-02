@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\app\efile\service.py
+# hypothesis_version: 6.140.2
+
+[400, 409, '%Y%m%d', '%y%j%H', '0', 'Environment', 'SoftwareId', 'SoftwareVersion', 'TransmitterId', 'artifact_root', 'artifacts', 'cra_schema_cache', 'daily_summary_root', 'digest', 'documents', 'last_sbmt_ref_id', 'province', 'response', 'sbmt_ref_id', 'settings', 'submission_digests', 'submissions', 'summaries', 'summary_index', 't183_ip_hash', 't183_signed_ts', 't183_user_agent_hash', 'tax_year', 'taxable_income', 'taxpayer_sin_masked', 'time_utc', 'updated_at', 'utf-8']

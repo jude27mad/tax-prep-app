@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\app\config.py
+# hypothesis_version: 6.140.2
+
+['0.0.3', '0.5', '1', '3', '30', '5', '900000', '900001', 'ARTIFACT_ROOT', 'BUILD_SHA', 'BUILD_VERSION', 'CERT', 'DAILY_SUMMARY_ROOT', 'EFILE_ENDPOINT_CERT', 'EFILE_ENDPOINT_PROD', 'EFILE_ENV', 'FEATURE_EFILE_XML', 'PROD', 'SOFTWARE_VERSION', 'Settings', 'T183_CRYPTO_KEY', 'TAXAPP-CERT', 'TAXAPP-PROD', 'TRANSMIT_BACKOFF', 'TRANSMIT_MAX_RETRIES', 'after', 'artifacts', 'artifacts/summaries', 'before', 'dev', 'efile_environment', 'local', 'on', 'transmit_max_retries', 'true', 'yes']

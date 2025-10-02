@@ -1,0 +1,4 @@
+# file: C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App\app\efile\t619.py
+# hypothesis_version: 6.140.2
+
+['0', 'ExpiresAt', 'NetIncome', 'Payload', 'Province', 'SignatureIPAddress', 'SignedAt', 'T183Authorization', 'T1Return', 'T619Transmission', 'TaxYear', 'TaxpayerSIN', 'TaxpayerSINMasked', 'ascii', 'cra_t1_return_v1.xsd', 'f', 'income_total', 'sbmt_ref_id', 't1', 't183', 'taxable_income', 'utf-8', 'xmlns']
