@@ -36,6 +36,9 @@ def test_t4_estimate_balance_and_contribution_statuses(
     assert balance * expected_balance_sign > 0, "balance sign mismatch"
     assert body["is_refund"] == (balance < 0)
 
+    taxes = body["tax"]
+    assert taxes["provincial"]["province_code"] == payload.get("province", "ON").upper()
+
     assert body["cpp"]["status"] == cpp_status
     assert body["cpp2"]["status"] == cpp2_status
     assert body["ei"]["status"] == ei_status

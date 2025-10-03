@@ -11,17 +11,6 @@ from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict
 
 try:
-    from rich.console import Console  # type: ignore[import-not-found]
-    from rich.panel import Panel  # type: ignore[import-not-found]
-    from rich.table import Table  # type: ignore[import-not-found]
-    from rich.text import Text  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover - optional dependency
-    Console = None  # type: ignore[assignment]
-    Panel = None  # type: ignore[assignment]
-    Table = None  # type: ignore[assignment]
-    Text = None  # type: ignore[assignment]
-
-try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
@@ -42,13 +31,23 @@ from app.tax.ca2025 import (
     federal_bpa_2025,
     tax_from_brackets as fed_tax,
 )
-from app.tax.on2025 import (
-    ON_BPA_2025,
-    ON_CREDIT_RATE,
-    health_premium_2025,
-    surtax_2025,
-    tax_from_brackets as on_tax,
-)
+from app.tax.dispatch import UnknownProvinceError, get_provincial_adapter
+
+def _load_rich_modules():
+    try:
+        from rich.console import Console  # type: ignore[import-not-found]
+        from rich.panel import Panel  # type: ignore[import-not-found]
+        from rich.table import Table  # type: ignore[import-not-found]
+        from rich.text import Text  # type: ignore[import-not-found]
+        return Console, Panel, Table, Text
+    except Exception:  # pragma: no cover - optional dependency
+        return None, None, None, None
+
+RichConsole, RichPanel, RichTable, RichText = _load_rich_modules()
+
+
+
+
 
 app = FastAPI(
     title="Tax App",
@@ -84,33 +83,41 @@ def _compute_tax_summary(income: float, rrsp: float, province: str) -> dict:
     fed_bpa = federal_bpa_2025(taxable)
     federal_after = max(0.0, _round_cents(federal_before - FED_CREDIT_RATE * fed_bpa))
 
-    ont_before = on_tax(taxable)
-    ont_after_credits = max(0.0, _round_cents(ont_before - ON_CREDIT_RATE * ON_BPA_2025))
-    on_surtax = surtax_2025(ont_after_credits)
-    on_premium = health_premium_2025(taxable)
-    ont_net = _round_cents(ont_after_credits + on_surtax + on_premium)
+    province_code = (province or "ON").upper()
+    try:
+        adapter = get_provincial_adapter(2025, province_code)
+    except UnknownProvinceError as exc:
+        raise ValueError(str(exc)) from exc
 
-    total_net_tax = _round_cents(_to_decimal(federal_after) + _to_decimal(ont_net))
+    provincial = adapter.compute(taxable)
+    total_net_tax = _round_cents(_to_decimal(federal_after) + _to_decimal(provincial.net_tax))
 
     return {
         "income": income,
         "rrsp": rrsp,
         "taxable_income": taxable,
+        "province": provincial.province_code,
         "federal": {
             "before_credits": federal_before,
             "bpa_used": fed_bpa,
             "after_credits": federal_after,
         },
-        "ontario": {
-            "before_credits": ont_before,
-            "bpa_used": ON_BPA_2025,
-            "after_credits": ont_after_credits,
-            "surtax": on_surtax,
-            "health_premium": on_premium,
-            "net_provincial": ont_net,
+        "provincial": {
+            "province_code": provincial.province_code,
+            "province_name": provincial.province_name,
+            "before_credits": provincial.before_credits,
+            "bpa_used": provincial.bpa_used,
+            "credit_rate": provincial.credit_rate,
+            "after_credits": provincial.after_credits,
+            "additions": provincial.additions,
+            "net_provincial": provincial.net_tax,
         },
         "total_net_tax": total_net_tax,
     }
+
+
+
+
 
 
 def _expected_cpp_contributions(income: float) -> tuple[float, float]:
@@ -455,14 +462,14 @@ def _resolve_color_preference(pref: ColorPreference) -> ColorPreference:
 
 
 def _get_console(pref: ColorPreference):
-    if Console is None:
+    if RichConsole is None:
         return None
     resolved = _resolve_color_preference(pref)
     if resolved == "never":
         return None
     force_terminal = resolved == "always"
     try:
-        return Console(force_terminal=force_terminal)
+        return RichConsole(force_terminal=force_terminal)
     except Exception:  # pragma: no cover - console init failure
         return None
 
@@ -473,10 +480,10 @@ def _console_print(console, message: str) -> None:
         print(message)
 
 
-def _build_table(title: str, columns: list[str]) -> Table | None:
-    if Table is None:
+def _build_table(title: str, columns: list[str]):
+    if RichTable is None:
         return None
-    table = Table(title=title, expand=False)
+    table = RichTable(title=title, expand=False)
     for column in columns:
         table.add_column(column)
     return table
@@ -489,7 +496,7 @@ def _print_import_preview(preview: ImportPreview | None, console) -> None:
     unknown = preview.get("unknown") or []
     if not mapping and not unknown:
         return
-    if Table is not None and console is not None:
+    if RichTable is not None and console is not None:
         table = _build_table("Imported fields", ["source", "field"])
         if table is not None:
             for source, field in mapping:
@@ -520,7 +527,7 @@ def _print_changes_summary(before: dict[str, Any], after: dict[str, Any], consol
         if before:
             _console_print(console, "\nNo changes from the saved answers.")
         return
-    if Table is not None and console is not None:
+    if RichTable is not None and console is not None:
         table = _build_table("Updated answers", ["field", "before", "after"])
         if table is not None:
             for key, old, new in changes:
@@ -1073,7 +1080,7 @@ def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, con
 def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) -> tuple[dict[str, Any] | None, bool]:
     """Return (final_answers, restart_requested)."""
     while True:
-        if Table is not None and console is not None:
+        if RichTable is not None and console is not None:
             table = _build_table("Review answers", ["field", "value"])
             if table is not None:
                 for key in CLI_SAVE_ORDER:
@@ -1239,7 +1246,7 @@ def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) 
         if not data:
             _console_print(console, "Profile is empty or not found.")
             return
-        if Table is not None and console is not None:
+        if RichTable is not None and console is not None:
             table = _build_table(f"Profile {slug}", ["field", "value"])
             if table is not None:
                 for key in CLI_SAVE_ORDER:
@@ -1308,6 +1315,10 @@ def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) 
 
 
 def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console) -> None:
+    provincial = outcome["tax"]["provincial"]
+    provincial_name = provincial["province_name"]
+    additions = provincial.get("additions", {})
+
     rows = [
         ("Employment income (box 14)", _format_currency(payload.box14), ""),
         ("Tax withheld (box 22)", _format_currency(payload.box22), ""),
@@ -1315,12 +1326,26 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         ("CPP2 reported (box 16A)", _format_currency(payload.box16a), outcome["cpp2"]["status"]),
         ("EI premiums (box 18)", _format_currency(payload.box18), outcome["ei"]["status"]),
         ("RRSP deduction", _format_currency(payload.rrsp), ""),
-        ("Province", payload.province, ""),
-        ("Federal tax after credits", _format_currency(outcome["tax"]["federal"]["after_credits"]), ""),
-        ("Ontario tax (after surtax/premium)", _format_currency(outcome["tax"]["ontario"]["net_provincial"]), ""),
-        ("Total tax owing", _format_currency(outcome["total_tax"]), ""),
-        ("Withholding applied", _format_currency(outcome["withholding"]), ""),
+        ("Province", provincial_name, ""),
+        (
+            "Federal tax after credits",
+            _format_currency(outcome["tax"]["federal"]["after_credits"]),
+            "",
+        ),
+        (
+            f"{provincial_name} tax after credits",
+            _format_currency(provincial["after_credits"]),
+            "",
+        ),
     ]
+
+    for key, value in additions.items():
+        rows.append((f"{provincial_name} {key.replace('_', ' ')}", _format_currency(value), ""))
+
+    rows.append((f"{provincial_name} net tax", _format_currency(provincial["net_provincial"]), ""))
+    rows.append(("Total tax owing", _format_currency(outcome["total_net_tax"]), ""))
+    rows.append(("Withholding applied", _format_currency(outcome["withholding"]), ""))
+
     balance = outcome["balance"]
     if outcome.get("is_refund"):
         rows.append(("Expected refund", _format_currency(abs(balance)), ""))
@@ -1328,7 +1353,8 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         rows.append(("Balance owing", _format_currency(balance), ""))
     else:
         rows.append(("Balance status", "No balance owing or refund detected.", ""))
-    if Table is not None and console is not None:
+
+    if RichTable is not None and console is not None:
         table = _build_table("Summary", ["Metric", "Value", "Status"])
         if table is not None:
             for metric, value, status in rows:
@@ -1342,9 +1368,6 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         if status:
             line += f" - status: {status}"
         _console_print(console, line)
-
-
-
 def _run_wizard(
     data_path: str | None,
     *,

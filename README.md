@@ -76,6 +76,10 @@ Wizard tips:
 `user_data.example.toml` or drop files into `inbox/` (see `inbox/README.txt`)
 when you are not using profiles.
 
+## Provincial coverage
+
+The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, and Manitoba (Québec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
+
 ## Running the APIs
 
 Open separate terminals for each API (activate `.venv` in both).
