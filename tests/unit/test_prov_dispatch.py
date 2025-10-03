@@ -29,7 +29,7 @@ def test_ontario_adapter_matches_legacy(taxable: float) -> None:
 
 
 def test_adapters_registered_for_top_provinces() -> None:
-    for code in ("ON", "BC", "AB", "MB"):
+    for code in ("ON", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"):
         adapter = get_provincial_adapter(2025, code)
         result = adapter.compute(60_000)
         assert result.net_tax >= 0

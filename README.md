@@ -78,7 +78,7 @@ when you are not using profiles.
 
 ## Provincial coverage
 
-The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, and Manitoba (Québec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
+The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, Manitoba, Saskatchewan, Nova Scotia, New Brunswick, Newfoundland and Labrador, Prince Edward Island, Yukon, Northwest Territories, and Nunavut (Québec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
 
 ## Running the APIs
 
