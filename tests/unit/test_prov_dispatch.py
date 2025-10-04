@@ -1,6 +1,10 @@
 import pytest
 
-from app.tax.dispatch import UnknownProvinceError, get_provincial_adapter
+from app.tax.dispatch import (
+    UnknownProvinceError,
+    get_provincial_adapter,
+    list_provincial_adapters,
+)
 from app.tax.on2025 import (
     ON_BPA_2025,
     ON_CREDIT_RATE,
@@ -34,6 +38,12 @@ def test_adapters_registered_for_top_provinces() -> None:
         result = adapter.compute(60_000)
         assert result.net_tax >= 0
         assert result.province_code == code
+
+
+def test_list_provincial_adapters_includes_registered_codes() -> None:
+    adapters = list_provincial_adapters(2025)
+    codes = [adapter.code for adapter in adapters]
+    assert codes == ["ON", "BC", "AB", "MB"]
 
 
 def test_unknown_province_raises() -> None:

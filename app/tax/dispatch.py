@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 from app.tax.prov.ab2025 import adapter as ab_2025
 from app.tax.prov.bc2025 import adapter as bc_2025
@@ -27,3 +27,17 @@ def get_provincial_adapter(year: int | str, province: str) -> ProvincialAdapter:
         return _REGISTRY[key]
     except KeyError as exc:  # pragma: no cover - surfaced to caller
         raise UnknownProvinceError(f"No provincial adapter registered for {key[1]} in {key[0]}") from exc
+
+
+def list_provincial_adapters(year: int | str | None = None) -> List[ProvincialAdapter]:
+    target_year = str(year) if year is not None else _YEAR
+    adapters: List[ProvincialAdapter] = []
+    seen: set[str] = set()
+    for (registered_year, code), adapter in _REGISTRY.items():
+        if registered_year != target_year:
+            continue
+        if code in seen:
+            continue
+        adapters.append(adapter)
+        seen.add(code)
+    return adapters
