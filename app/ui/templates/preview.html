@@ -1,0 +1,29 @@
+{% if preview_errors and preview_errors|length %}
+  <ul style="color:#b91c1c; padding-left:1.1rem;">
+    {% for err in preview_errors %}
+      <li>{{ err }}</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+{% if preview %}
+  <h4>Balance</h4>
+  <p>
+    Net tax: <strong>{{ format_currency(preview.total_tax) }}</strong><br />
+    Withholding: <strong>{{ format_currency(preview.withholding) }}</strong><br />
+    {% if preview.is_refund %}
+      Expected refund: <strong style="color:#16a34a;">{{ format_currency(preview.balance | abs) }}</strong>
+    {% else %}
+      Amount owing: <strong style="color:#b91c1c;">{{ format_currency(preview.balance) }}</strong>
+    {% endif %}
+  </p>
+
+  <h4>Contribution limits</h4>
+  <ul>
+    <li>CPP: reported {{ format_currency(preview.cpp.reported) }} (limit {{ format_currency(preview.cpp.maximum_allowed) }}) – {{ preview.cpp.status }}</li>
+    <li>CPP2: reported {{ format_currency(preview.cpp2.reported) }} (limit {{ format_currency(preview.cpp2.maximum_allowed) }}) – {{ preview.cpp2.status }}</li>
+    <li>EI: reported {{ format_currency(preview.ei.reported) }} (limit {{ format_currency(preview.ei.maximum_allowed) }}) – {{ preview.ei.status }}</li>
+  </ul>
+{% elif not preview_errors %}
+  <p>Fill in the form to see a live preview.</p>
+{% endif %}

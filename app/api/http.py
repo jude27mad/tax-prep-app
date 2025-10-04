@@ -20,6 +20,7 @@ from ..core.tax_years._2025_alias import compute_return as compute_return_2025
 from ..core.validate.pre_submit import validate_return_input
 from ..efile.serialize import serialize
 from ..printout.t1_render import render_t1_pdf
+from ..ui import router as ui_router
 
 DEFAULT_TAX_YEAR = 2025
 logger = logging.getLogger("tax_app")
@@ -37,6 +38,7 @@ app = FastAPI(
     description="Default year: 2025. Use /tax/2025/compute for current filings; /tax/2024/compute remains available for backfiling.",
     lifespan=build_application_lifespan("preparer", startup_hook=_announce_default_tax_year),
 )
+app.include_router(ui_router)
 router = APIRouter()
 
 

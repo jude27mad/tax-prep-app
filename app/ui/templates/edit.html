@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block head %}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('profile-form');
+      const previewContainer = document.getElementById('preview-container');
+      if (!form || !previewContainer) {
+        return;
+      }
+      let timeoutId;
+      const updatePreview = async () => {
+        const url = form.dataset.previewUrl;
+        if (!url) {
+          return;
+        }
+        const formData = new FormData(form);
+        try {
+          const response = await fetch(url, { method: 'POST', body: formData });
+          const html = await response.text();
+          previewContainer.innerHTML = html;
+        } catch (err) {
+          previewContainer.innerHTML = '<p style="color:#b91c1c;">Unable to refresh preview.</p>';
+        }
+      };
+      const scheduleUpdate = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(updatePreview, 250);
+      };
+      form.addEventListener('input', scheduleUpdate);
+      form.addEventListener('change', scheduleUpdate);
+    });
+  </script>
+{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <a href="/ui/">← Back to profiles</a>
+    <h2>Edit profile: {{ profile_slug }}</h2>
+    <p class="secondary">Data file: <code>{{ profile_path }}</code></p>
+
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <div style="margin-bottom:1rem;">
+      <form class="inline" method="post" action="/ui/profiles/{{ profile_slug }}/rename">
+        <label for="rename">Rename profile:</label>
+        <input id="rename" name="new_name" type="text" required value="{{ profile_slug }}" />
+        <button type="submit" class="btn secondary">Rename</button>
+      </form>
+      <form class="inline" method="post" action="/ui/profiles/{{ profile_slug }}/delete" onsubmit="return confirm('Move this profile to trash?');">
+        <button type="submit" class="btn danger">Delete</button>
+      </form>
+    </div>
+
+    <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+      <form id="profile-form" method="post" action="/ui/profiles/{{ profile_slug }}" data-preview-url="/ui/profiles/{{ profile_slug }}/preview" style="flex:1 1 320px;">
+        {% for field in fields %}
+          <div style="margin-bottom:1rem;">
+            <label for="field-{{ field.name }}">{{ field.label }}{% if not field.optional %} *{% endif %}</label><br />
+            {% if field.input_type == 'checkbox' %}
+              <input id="field-{{ field.name }}" name="{{ field.name }}" type="checkbox" value="1" {% if field.value %}checked{% endif %} />
+            {% elif field.input_type == 'number' %}
+              <input id="field-{{ field.name }}" name="{{ field.name }}" type="number" step="0.01" {% if field.inputmode %}inputmode="{{ field.inputmode }}"{% endif %} {% if field.placeholder %}placeholder="{{ field.placeholder }}"{% endif %} {% if field.min is not none %}min="{{ field.min }}"{% endif %} value="{% if field.value is not none %}{{ field.value }}{% endif %}" />
+            {% else %}
+              <input id="field-{{ field.name }}" name="{{ field.name }}" type="text" {% if field.placeholder %}placeholder="{{ field.placeholder }}"{% endif %} value="{% if field.value is not none %}{{ field.value }}{% endif %}" />
+            {% endif %}
+            {% if field.help %}
+              <div style="font-size:0.85rem; color:#4b5563;">{{ field.help }}</div>
+            {% endif %}
+            {% if field.error %}
+              <div style="color:#b91c1c; font-size:0.85rem;">{{ field.error }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+        <div>
+          <button type="submit" class="btn">Save profile</button>
+        </div>
+      </form>
+
+      <div style="flex:1 1 320px;">
+        <h3>Instant preview</h3>
+        <div id="preview-container" class="preview">
+          {% include "preview.html" %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
