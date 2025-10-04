@@ -43,3 +43,8 @@ def get_provincial_adapter(year: int | str, province: str) -> ProvincialAdapter:
         return _REGISTRY[key]
     except KeyError as exc:  # pragma: no cover - surfaced to caller
         raise UnknownProvinceError(f"No provincial adapter registered for {key[1]} in {key[0]}") from exc
+
+
+def list_supported_provinces(year: int | str) -> list[str]:
+    year_key = str(year)
+    return sorted(adapter.code for (yr, _), adapter in _REGISTRY.items() if yr == year_key)
