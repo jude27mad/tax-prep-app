@@ -55,6 +55,8 @@ app = FastAPI(
     lifespan=build_application_lifespan("estimator"),
 )
 
+DEFAULT_TAX_YEAR = 2025
+
 CPP_BASE_EXEMPTION = 3_500.0
 CPP_YMPE_2025 = 71_300.0
 CPP_YAMPE_2025 = 81_200.0
@@ -76,7 +78,12 @@ def _round_cents(value: float | Decimal) -> float:
 
 
 
-def _compute_tax_summary(income: float, rrsp: float, province: str) -> dict:
+def _compute_tax_summary(
+    income: float,
+    rrsp: float,
+    province: str,
+    tax_year: int = DEFAULT_TAX_YEAR,
+) -> dict:
     taxable = max(0.0, income - max(rrsp, 0.0))
 
     federal_before = fed_tax(taxable, FEDERAL_2025)
@@ -85,7 +92,7 @@ def _compute_tax_summary(income: float, rrsp: float, province: str) -> dict:
 
     province_code = (province or "ON").upper()
     try:
-        adapter = get_provincial_adapter(2025, province_code)
+        adapter = get_provincial_adapter(tax_year, province_code)
     except UnknownProvinceError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -97,6 +104,7 @@ def _compute_tax_summary(income: float, rrsp: float, province: str) -> dict:
         "rrsp": rrsp,
         "taxable_income": taxable,
         "province": provincial.province_code,
+        "tax_year": tax_year,
         "federal": {
             "before_credits": federal_before,
             "bpa_used": fed_bpa,
@@ -162,8 +170,13 @@ def health():
 
 
 @app.get("/tax/estimate")
-def estimate(income: float, rrsp: float = 0.0, province: str = "ON"):
-    return _compute_tax_summary(income, rrsp, province)
+def estimate(
+    income: float,
+    rrsp: float = 0.0,
+    province: str = "ON",
+    tax_year: int = DEFAULT_TAX_YEAR,
+):
+    return _compute_tax_summary(income, rrsp, province, tax_year)
 
 
 class T4EstimateRequest(BaseModel):
@@ -204,6 +217,12 @@ class T4EstimateRequest(BaseModel):
         validation_alias=AliasChoices("rrsp", "rrsp_deduction"),
     )
     province: str = Field("ON", description="Province code, defaults to ON")
+    tax_year: int = Field(
+        DEFAULT_TAX_YEAR,
+        description="Tax year for the estimate",
+        ge=2024,
+        validation_alias=AliasChoices("tax_year", "year"),
+    )
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -211,7 +230,12 @@ class T4EstimateRequest(BaseModel):
 @app.post("/tax/t4")
 @app.post("/t4/estimate")
 def estimate_from_t4(payload: T4EstimateRequest):
-    tax_summary = _compute_tax_summary(payload.box14, payload.rrsp, payload.province)
+    tax_summary = _compute_tax_summary(
+        payload.box14,
+        payload.rrsp,
+        payload.province,
+        payload.tax_year,
+    )
     total_tax = tax_summary["total_net_tax"]
     total_tax_dec = _to_decimal(total_tax)
     withheld = _round_cents(payload.box22)
@@ -233,6 +257,7 @@ def estimate_from_t4(payload: T4EstimateRequest):
             "box18": payload.box18,
             "rrsp": payload.rrsp,
             "province": payload.province,
+            "tax_year": payload.tax_year,
         },
         "tax": tax_summary,
         "total_tax": total_tax,
@@ -267,13 +292,23 @@ PROFILE_HISTORY_DIR = PROFILES_DIR / "history"
 PROFILE_TRASH_DIR = PROFILES_DIR / ".trash"
 DEFAULT_PROFILE_FILE = PROFILES_DIR / "active_profile.txt"
 
-CLI_SUBMIT_FIELDS = {"box14", "box22", "box16", "box16a", "box18", "rrsp", "province"}
+CLI_SUBMIT_FIELDS = {
+    "box14",
+    "box22",
+    "box16",
+    "box16a",
+    "box18",
+    "rrsp",
+    "province",
+    "tax_year",
+}
 CLI_NUMERIC_FIELDS = {"box14", "box22", "box16", "box16a", "box18", "rrsp"}
-CLI_INT_FIELDS = {"num_dependents"}
+CLI_INT_FIELDS = {"num_dependents", "tax_year"}
 CLI_BOOL_FIELDS = {"dependents"}
 CLI_SAVE_ORDER = [
     "full_name",
     "province",
+    "tax_year",
     "box14",
     "box22",
     "box16",
@@ -544,6 +579,7 @@ def _print_changes_summary(before: dict[str, Any], after: dict[str, Any], consol
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "full_name": ("full name", "name", "legal name", "taxpayer name"),
     "province": ("province", "province code", "province of residence", "prov", "residence province"),
+    "tax_year": ("tax year", "year", "filing year"),
     "box14": ("box14", "box 14", "employment income", "wages", "salary", "income", "t4 box 14"),
     "box22": ("box22", "box 22", "tax deducted", "tax withheld", "withholding", "income tax deducted", "t4 box 22"),
     "box16": ("box16", "box 16", "cpp contributions", "cpp", "t4 box 16"),
@@ -586,6 +622,13 @@ _HELP_TOPICS: dict[str, str] = {
         The wizard asks for: your name (optional), province, and the T4 boxes (14, 22, 16, 16A, 18),
         plus RRSP deductions if you have them. Press Enter to keep the current value, or enter a new one.
         You can type amounts like 57k, $12,345.67, or 12345. The app cleans them automatically.
+        """
+    ).strip(),
+    "tax_year": textwrap.dedent(
+        """
+        Tax App currently estimates the 2025 tax year. Quebec returns are handled
+        separately outside this estimator. The flag is ready for 2026 once the
+        provincial adapters land.
         """
     ).strip(),
     "box14": textwrap.dedent(
@@ -690,7 +733,7 @@ _HELP_TOPICS: dict[str, str] = {
     "topics": textwrap.dedent(
         """
         Available help topics include: overview, wizard, box14, box22, box16, box16a, box18, rrsp, province,
-        full_name, dependents, checklist. Run `python -m app.main help <topic>` to open one of them.
+        tax_year, full_name, dependents, checklist. Run `python -m app.main help <topic>` to open one of them.
         """
     ).strip(),
 }
@@ -737,6 +780,7 @@ _CHECKLIST_BASE = [
 _WIZARD_SEQUENCE: list[PromptStep] = [
     {"field": "full_name", "required": False},
     {"field": "province", "required": False},
+    {"field": "tax_year", "required": True},
     {"field": "box14", "required": True},
     {"field": "box22", "required": True},
     {"field": "box16", "required": True},
@@ -756,6 +800,12 @@ _FIELD_METADATA: dict[str, dict[str, Any]] = {
         "hint": "Example: ON, BC, AB, QC.",
         "default": "ON",
         "help_topic": "province",
+    },
+    "tax_year": {
+        "label": "Tax year to estimate",
+        "hint": "2025 is the default. 2026 support will land when the adapters do.",
+        "default": DEFAULT_TAX_YEAR,
+        "help_topic": "tax_year",
     },
     "box14": {
         "label": "Employment income — T4 box 14",
@@ -1039,9 +1089,26 @@ def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, l
     return {}, None, unsupported, errors, None
 
 
-def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, console=None) -> dict[str, Any]:
+def _prompt_for_missing_fields(
+    data: dict[str, Any], *, quick: bool = False, console=None, non_interactive: bool = False
+) -> dict[str, Any]:
     working = {key: _coerce_for_field(key, value) for key, value in data.items()}
     steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
+
+    if non_interactive:
+        missing_required = [
+            meta["field"]
+            for meta in steps
+            if meta.get("required", False) and not _has_value(working.get(meta["field"]))
+        ]
+        if missing_required:
+            missing = ", ".join(sorted(missing_required))
+            raise ValueError(
+                "Missing required fields for non-interactive run: "
+                f"{missing}. Provide them via --data or profiles."
+            )
+        return working
+
     if quick:
         steps = [meta for meta in steps if meta.get("required", False)]
     else:
@@ -1077,8 +1144,16 @@ def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, con
 
 
 
-def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) -> tuple[dict[str, Any] | None, bool]:
+def _review_answers(
+    starting: dict[str, Any],
+    answers: dict[str, Any],
+    console,
+    *,
+    non_interactive: bool = False,
+) -> tuple[dict[str, Any] | None, bool]:
     """Return (final_answers, restart_requested)."""
+    if non_interactive:
+        return answers, False
     while True:
         if RichTable is not None and console is not None:
             table = _build_table("Review answers", ["field", "value"])
@@ -1327,6 +1402,7 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         ("EI premiums (box 18)", _format_currency(payload.box18), outcome["ei"]["status"]),
         ("RRSP deduction", _format_currency(payload.rrsp), ""),
         ("Province", provincial_name, ""),
+        ("Tax year", str(outcome["tax"]["tax_year"]), ""),
         (
             "Federal tax after credits",
             _format_currency(outcome["tax"]["federal"]["after_credits"]),
@@ -1343,7 +1419,7 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         rows.append((f"{provincial_name} {key.replace('_', ' ')}", _format_currency(value), ""))
 
     rows.append((f"{provincial_name} net tax", _format_currency(provincial["net_provincial"]), ""))
-    rows.append(("Total tax owing", _format_currency(outcome["total_net_tax"]), ""))
+    rows.append(("Total tax owing", _format_currency(outcome["total_tax"]), ""))
     rows.append(("Withholding applied", _format_currency(outcome["withholding"]), ""))
 
     balance = outcome["balance"]
@@ -1377,6 +1453,9 @@ def _run_wizard(
     profile_errors: list[str],
     quick: bool,
     console,
+    default_year: int = DEFAULT_TAX_YEAR,
+    non_interactive: bool = False,
+    force_year: bool = False,
 ) -> None:
     if profile_errors:
         for message in profile_errors:
@@ -1384,6 +1463,8 @@ def _run_wizard(
     file_data, source, unsupported, errors, preview = _load_inputs(data_path)
     _console_print(console, "Tax App guided mode")
     _console_print(console, "===================")
+    if non_interactive:
+        _console_print(console, "Running in non-interactive mode (using pre-filled answers).")
     if errors:
         for message in errors:
             _console_print(console, f"NOTE: {message}")
@@ -1403,16 +1484,30 @@ def _run_wizard(
         for item in unsupported:
             _console_print(console, f"  - {_friendly_path(item)}")
     combined = {**profile_data, **file_data}
+    if default_year:
+        if force_year:
+            combined["tax_year"] = default_year
+        else:
+            combined.setdefault("tax_year", default_year)
     starting = combined.copy()
     while True:
-        answers = _prompt_for_missing_fields(starting.copy(), quick=quick, console=console)
-        reviewed, restart = _review_answers(starting, answers, console)
+        try:
+            answers = _prompt_for_missing_fields(
+                starting.copy(), quick=quick, console=console, non_interactive=non_interactive
+            )
+        except ValueError as exc:
+            _console_print(console, f"ERROR: {exc}")
+            sys.exit(1)
+        reviewed, restart = _review_answers(
+            starting, answers, console, non_interactive=non_interactive
+        )
         if restart:
             quick = False
+            starting = combined.copy()
             continue
         if reviewed is not None:
             answers = reviewed
-            break
+        break
     payload_data = {key: value for key, value in answers.items() if key in CLI_SUBMIT_FIELDS and value is not None}
     try:
         payload = T4EstimateRequest.model_validate(payload_data)
@@ -1465,6 +1560,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         const="never",
         help="Alias for --color never.",
     )
+    parser.add_argument(
+        "--year",
+        type=int,
+        help=f"Tax year for the estimate (default: {DEFAULT_TAX_YEAR}).",
+    )
     parser.add_argument("--no-save", action="store_true", help="Do not persist answers after running.")
     return parser.parse_args(argv)
 
@@ -1472,6 +1572,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
     console = _get_console(args.color)
+    force_year = args.year is not None
+    selected_year = args.year if force_year else DEFAULT_TAX_YEAR
+    non_interactive = bool(
+        args.command == "wizard"
+        and (not sys.stdin.isatty() or (args.quick and bool(args.data)))
+    )
     if args.command == "help":
         topic = args.subargs[0] if args.subargs else None
         _print_help_topic(topic)
@@ -1495,6 +1601,9 @@ def main(argv: list[str] | None = None) -> None:
         profile_errors=profile_errors,
         quick=args.quick,
         console=console,
+        default_year=selected_year,
+        non_interactive=non_interactive,
+        force_year=force_year,
     )
 
 

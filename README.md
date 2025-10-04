@@ -14,24 +14,64 @@ Comprehensive CRA-focused toolkit comprising:
 
 ```text
 .
-├── app
-│   ├── api/            # Preparer FastAPI application
-│   ├── core/           # Domain models, calculators, validators
-│   ├── efile/          # XML builders, transmission client, retention logic
-│   ├── main.py         # Estimator FastAPI application
-│   ├── lifespan.py     # Shared startup/shutdown manager
-│   └── schemas/        # CRA XSD cache (T619, T1, T183, etc.)
-├── docs/               # Operational guidance (e.g., CRA suitability checklist)
-├── scripts/            # Replay, reject scan, coverage gate, IFT mock, purge jobs
-├── tests/              # Unit, e2e, golden XML, fuzz suites
-└── requirements.txt
-```
+â”œâ”€â”€ app
+â”‚   â”œâ”€â”€ api/            # Preparer FastAPI application
+â”‚   â”œâ”€â”€ core/           # Domain models, calculators, validators
+â”‚   â”œâ”€â”€ efile/          # XML builders, transmission client, retention logic
+â”‚   â”œâ”€â”€ main.py         # Estimator FastAPI application
+â”‚   â”œâ”€â”€ lifespan.py     # Shared startup/shutdown manager
+python -m app.main --year 2025  # override the default explicitly (2026 planned)
+  for restores. Manage them with:
 
-## Quick start (single terminal)
+  ```bash
+  python -m app.main profiles list
+  python -m app.main profiles show SAMPLE
+  python -m app.main profiles switch family-2025
+  python -m app.main profiles rename old new
+  python -m app.main profiles delete sample
+  ```
+- Use `--year YYYY` to override the tax year that drives the provincial adapter.
+  2025 is the default; the flag is wired for 2026 once adapters land.
+- Combine `--data PATH` with `--quick` when everything is pre-filled. Adding
+  `--color never --no-save` keeps output deterministic and avoids writing to
+  disk during automation.
+- Need a headless smoke test? The wizard skips all prompts when data is
+  complete, so the CI command works locally too:
 
-```powershell
-cd "C:\Users\Joud2\OneDrive\Desktop\Coding\Playground\Tax_App"
-python -m venv .venv
+  ```bash
+  python -m app.main \
+    --data tests/fixtures/user_data.toml \
+    --profile sample \
+    --quick \
+    --color never \
+    --no-save
+  ```
+- Control colors with `--color {auto,always,never}` (or `--no-color`). Rich
+  tables appear when installed; otherwise the wizard prints plain text. CI
+  should stick to `--color never` so logs stay ANSI-free.
+
+| Province / Territory | 2025 support | 2026 roadmap |
+| --- | --- | --- |
+| Alberta (AB) | Yes | Planned |
+| British Columbia (BC) | Yes | Planned |
+| Manitoba (MB) | Yes | Planned |
+| New Brunswick (NB) | Yes | Planned |
+| Newfoundland & Labrador (NL) | Yes | Planned |
+| Nova Scotia (NS) | Yes | Planned |
+| Ontario (ON) | Yes | Planned |
+| Prince Edward Island (PE) | Yes | Planned |
+| Saskatchewan (SK) | Yes | Planned |
+| Yukon (YT) | Yes | Planned |
+| Northwest Territories (NT) | Yes | Planned |
+| Nunavut (NU) | Yes | Planned |
+| Quebec (QC) | Separate (use Revenu Quebec) | Separate workflow |
+
+Quebec returns require the Revenu Quebec platforms today; the CLI `--year` flag is wired for the next CRA season so the adapters can drop in as soon as they are published.
+Docs: Swagger UI at <http://127.0.0.1:8000/docs> and ReDoc at
+<http://127.0.0.1:8000/redoc>. The OpenAPI JSON lives at `/openapi.json` if you
+prefer to explore with Postman or Bruno.
+Docs: Swagger UI at <http://127.0.0.1:8001/docs> and ReDoc at
+<http://127.0.0.1:8001/redoc>.
 . .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -78,7 +118,7 @@ when you are not using profiles.
 
 ## Provincial coverage
 
-The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, Manitoba, Saskatchewan, Nova Scotia, New Brunswick, Newfoundland and Labrador, Prince Edward Island, Yukon, Northwest Territories, and Nunavut (Qu�bec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
+The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, Manitoba, Saskatchewan, Nova Scotia, New Brunswick, Newfoundland and Labrador, Prince Edward Island, Yukon, Northwest Territories, and Nunavut (Québec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
 
 ## Running the APIs
 

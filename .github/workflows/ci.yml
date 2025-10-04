@@ -13,3 +13,4 @@ jobs:
       - run: ruff check .
       - run: mypy app
       - run: pytest -q
+      - run: python -m app.main --data tests/fixtures/user_data.toml --profile sample --quick --color never --no-save
