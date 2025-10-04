@@ -6,6 +6,14 @@ from app.tax.prov.ab2025 import adapter as ab_2025
 from app.tax.prov.bc2025 import adapter as bc_2025
 from app.tax.prov.mb2025 import adapter as mb_2025
 from app.tax.prov.on2025 import adapter as on_2025
+from app.tax.prov.sk2025 import adapter as sk_2025
+from app.tax.prov.ns2025 import adapter as ns_2025
+from app.tax.prov.nb2025 import adapter as nb_2025
+from app.tax.prov.nl2025 import adapter as nl_2025
+from app.tax.prov.pe2025 import adapter as pe_2025
+from app.tax.prov.yt2025 import adapter as yt_2025
+from app.tax.prov.nt2025 import adapter as nt_2025
+from app.tax.prov.nu2025 import adapter as nu_2025
 from app.tax.prov.base import ProvincialAdapter
 
 _YEAR = "2025"
@@ -14,6 +22,14 @@ _REGISTRY: Dict[Tuple[str, str], ProvincialAdapter] = {
     (_YEAR, "BC"): bc_2025,
     (_YEAR, "AB"): ab_2025,
     (_YEAR, "MB"): mb_2025,
+    (_YEAR, "SK"): sk_2025,
+    (_YEAR, "NS"): ns_2025,
+    (_YEAR, "NB"): nb_2025,
+    (_YEAR, "NL"): nl_2025,
+    (_YEAR, "PE"): pe_2025,
+    (_YEAR, "YT"): yt_2025,
+    (_YEAR, "NT"): nt_2025,
+    (_YEAR, "NU"): nu_2025,
 }
 
 
@@ -31,8 +47,8 @@ def get_provincial_adapter(year: int | str, province: str) -> ProvincialAdapter:
 
 def list_provincial_adapters(year: int | str | None = None) -> List[ProvincialAdapter]:
     target_year = str(year) if year is not None else _YEAR
-    adapters: List[ProvincialAdapter] = []
     seen: set[str] = set()
+    adapters: List[ProvincialAdapter] = []
     for (registered_year, code), adapter in _REGISTRY.items():
         if registered_year != target_year:
             continue
@@ -41,3 +57,8 @@ def list_provincial_adapters(year: int | str | None = None) -> List[ProvincialAd
         adapters.append(adapter)
         seen.add(code)
     return adapters
+
+def list_supported_provinces(year: int | str | None = None) -> list[str]:
+    # reuse the adapters list to keep de-dupe logic consistent
+    return sorted(a.code for a in list_provincial_adapters(year))
+  
