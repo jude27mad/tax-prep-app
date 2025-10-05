@@ -5,7 +5,7 @@ from app.tax.dispatch import (
     get_provincial_adapter,
     list_provincial_adapters,
     list_supported_provinces,
-
+    NEXT_TAX_YEAR,  # fix F821: import the constant used below
 )
 from app.tax.on2025 import (
     ON_BPA_2025,
@@ -35,7 +35,9 @@ def test_ontario_adapter_matches_legacy(taxable: float) -> None:
 
 
 def test_adapters_registered_for_top_provinces() -> None:
-    for code in ("ON", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU"):
+    provinces = list_supported_provinces(2025)
+    assert provinces
+    for code in provinces:
         adapter = get_provincial_adapter(2025, code)
         result = adapter.compute(60_000)
         assert result.net_tax >= 0
@@ -53,3 +55,11 @@ def test_list_provincial_adapters_includes_registered_codes() -> None:
 def test_unknown_province_raises() -> None:
     with pytest.raises(UnknownProvinceError):
         get_provincial_adapter(2025, "ZZ")
+
+
+def test_next_year_not_registered_yet() -> None:
+    provinces = list_supported_provinces(2025)
+    assert provinces
+    for code in provinces:
+        with pytest.raises(UnknownProvinceError):
+            get_provincial_adapter(NEXT_TAX_YEAR, code)

@@ -38,6 +38,8 @@ def test_t4_estimate_balance_and_contribution_statuses(
 
     taxes = body["tax"]
     assert taxes["provincial"]["province_code"] == payload.get("province", "ON").upper()
+    assert taxes["tax_year"] == payload.get("tax_year", 2025)
+    assert body["inputs"]["tax_year"] == payload.get("tax_year", 2025)
 
     assert body["cpp"]["status"] == cpp_status
     assert body["cpp2"]["status"] == cpp2_status
