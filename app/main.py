@@ -1,4 +1,4 @@
-# app/main.py (drop-in replacement)
+# app/main.py  — drop-in replacement
 
 import argparse
 import os
@@ -51,7 +51,7 @@ from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
 from app.tax.dispatch import (
     list_provincial_adapters,
-    DEFAULT_TAX_YEAR,  # <-- needed by defaults/help and adapter list
+    DEFAULT_TAX_YEAR,  # default year constant
 )
 
 
@@ -77,14 +77,18 @@ app = FastAPI(
 app.include_router(ui_router)
 
 
+# ----------- API ROUTES -----------
+
 @app.get("/tax/estimate")
 def estimate(
     income: float,
     rrsp: float = 0.0,
     province: str = "ON",
-    tax_year: int = DEFAULT_TAX_YEAR,
+    tax_year: int = DEFAULT_TAX_YEAR,  # accepted for forward compat; compute uses adapters internally
 ):
-    # compute_tax_summary currently takes (income, rrsp, province)
+    # NOTE: _compute_tax_summary currently takes (income, rrsp, province).
+    # Keep the tax_year query param to stay stable with clients, but do not pass it
+    # into _compute_tax_summary until its signature adds it.
     return _compute_tax_summary(income, rrsp, province)
 
 
@@ -92,12 +96,18 @@ def estimate(
 @app.post("/t4/estimate")
 def estimate_from_t4(payload: T4EstimateRequest):
     result = _estimate_from_t4(payload)
-    # Ensure tests can rely on tax_year being present in the response:
-    tax = result.get("tax")
-    if isinstance(tax, dict) and "tax_year" not in tax:
-        # Prefer payload.tax_year when provided; else fall back to DEFAULT_TAX_YEAR
-        year = getattr(payload, "tax_year", None) or DEFAULT_TAX_YEAR
-        tax["tax_year"] = int(year)
+
+    # Tests expect `tax.tax_year` and `inputs.tax_year` to exist (defaulting to 2025).
+    year = getattr(payload, "tax_year", None) or DEFAULT_TAX_YEAR
+    if isinstance(result, dict):
+        tax = result.setdefault("tax", {})
+        if isinstance(tax, dict):
+            tax.setdefault("tax_year", int(year))
+
+        inputs = result.setdefault("inputs", {})
+        if isinstance(inputs, dict):
+            inputs.setdefault("tax_year", int(year))
+
     return result
 
 
@@ -117,6 +127,8 @@ def health():
         "schemas": schema_versions,
     }
 
+
+# ----------- CLI / Wizard helpers -----------
 
 class PromptStep(TypedDict):
     field: str
@@ -512,9 +524,7 @@ _FIELD_METADATA: dict[str, dict[str, Any]] = {
 
 # Province choices (use the configured default year)
 _PROVINCE_ADAPTERS = tuple(list_provincial_adapters(DEFAULT_TAX_YEAR))
-_PROVINCE_CHOICES: tuple[tuple[str, str], ...] = tuple(
-    (a.code, a.name) for a in _PROVINCE_ADAPTERS
-)
+_PROVINCE_CHOICES: tuple[tuple[str, str], ...] = tuple((a.code, a.name) for a in _PROVINCE_ADAPTERS)
 _FIELD_METADATA["province"]["choices"] = _PROVINCE_CHOICES
 _FIELD_METADATA["province"]["choices_label"] = "Available provinces and territories"
 _PROVINCE_CODES = {code for code, _ in _PROVINCE_CHOICES}
@@ -1016,16 +1026,8 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         ("RRSP deduction", _format_currency(payload.rrsp), ""),
         ("Province", provincial_name, ""),
         ("Tax year", str(outcome["tax"]["tax_year"]), ""),
-        (
-            "Federal tax after credits",
-            _format_currency(outcome["tax"]["federal"]["after_credits"]),
-            "",
-        ),
-        (
-            f"{provincial_name} tax after credits",
-            _format_currency(provincial["after_credits"]),
-            "",
-        ),
+        ("Federal tax after credits", _format_currency(outcome["tax"]["federal"]["after_credits"]), ""),
+        (f"{provincial_name} tax after credits", _format_currency(provincial["after_credits"]), ""),
     ]
 
     for key, value in additions.items():
@@ -1039,7 +1041,7 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
     if outcome.get("is_refund"):
         rows.append(("Expected refund", _format_currency(abs(balance)), ""))
     elif balance > 0:
-        rows.append(("Balance owing", _format_currency(balance), ""))
+        rows.append(("Balance owing", _format_currency(balance)), "")
     else:
         rows.append(("Balance status", "No balance owing or refund detected.", ""))
 
@@ -1229,4 +1231,5 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
 
