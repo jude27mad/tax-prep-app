@@ -8,7 +8,7 @@ import textwrap
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, Sequence, TypedDict
 
 try:
     import tomllib  # Python 3.11+
@@ -59,6 +59,11 @@ from app.wizard import (
 from app.wizard.estimator import compute_tax_summary as _compute_tax_summary
 from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
+from app.tax.dispatch import (
+    UnknownProvinceError,
+    get_provincial_adapter,
+    list_provincial_adapters,
+)
 
 def _load_rich_modules():
     try:
@@ -150,6 +155,26 @@ def _build_table(title: str, columns: list[str]):
     for column in columns:
         table.add_column(column)
     return table
+
+
+def _print_choices(
+    choices: Sequence[tuple[str, str]] | None,
+    console,
+    heading: str | None = None,
+) -> None:
+    if not choices:
+        return
+    title = heading or "Available options"
+    if RichTable is not None and console is not None:
+        table = _build_table(title, ["#", "Code", "Description"])
+        if table is not None:
+            for index, (code, description) in enumerate(choices, start=1):
+                table.add_row(str(index), code, description)
+            console.print(table)
+            return
+    _console_print(console, f"  {title}:")
+    for index, (code, description) in enumerate(choices, start=1):
+        _console_print(console, f"    {index}. {description} ({code})")
 
 
 def _print_import_preview(preview: ImportPreview | None, console) -> None:
@@ -454,6 +479,21 @@ _FIELD_METADATA: dict[str, dict[str, Any]] = {
     },
 }
 
+# Province choices (2025)
+_PROVINCE_ADAPTERS = tuple(list_provincial_adapters(2025))
+_PROVINCE_CHOICES: tuple[tuple[str, str], ...] = tuple(
+    (a.code, a.name) for a in _PROVINCE_ADAPTERS
+)
+_FIELD_METADATA["province"]["choices"] = _PROVINCE_CHOICES
+_FIELD_METADATA["province"]["choices_label"] = "Available provinces and territories"
+_PROVINCE_CODES = {code for code, _ in _PROVINCE_CHOICES}
+
+NUM_SUFFIXES = {
+    "k": 1_000.0,
+    "m": 1_000_000.0,
+    "b": 1_000_000_000.0,
+}
+
 
 def _normalize_key(raw: str) -> str:
     return re.sub(r"[^a-z0-9]", "", raw.lower())
@@ -492,8 +532,49 @@ def _parse_bool(text: str) -> bool:
     return parse_bool(text)
 
 
+def _match_choice(text: str, choices: Sequence[tuple[str, str]]) -> str | None:
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    if cleaned.isdigit():
+        index = int(cleaned)
+        if 1 <= index <= len(choices):
+            return choices[index - 1][0]
+    upper = cleaned.upper()
+    for code, _ in choices:
+        if upper == code:
+            return code
+    lower = cleaned.lower()
+    for code, description in choices:
+        if lower == description.lower():
+            return code
+    return None
+
+
 def _coerce_for_field(field: str, value: Any) -> Any:
-    return _coerce_for_field_impl(field, value)
+    if value is None:
+        return None
+    if field in CLI_NUMERIC_FIELDS:
+        if isinstance(value, (int, float)):
+            return _round_cents(float(value))
+        if isinstance(value, Decimal):
+            return _round_cents(float(value))
+        return _round_cents(_parse_number(str(value)))
+    if field in CLI_INT_FIELDS:
+        if isinstance(value, (int, float)):
+            return int(round(float(value)))
+        return int(round(_parse_number(str(value))))
+    if field in CLI_BOOL_FIELDS:
+        if isinstance(value, bool):
+            return value
+        return _parse_bool(str(value))
+    if field == "province":
+        cleaned = str(value).strip().upper()
+        if cleaned and _PROVINCE_CODES and cleaned not in _PROVINCE_CODES:
+            allowed = ", ".join(sorted(_PROVINCE_CODES))
+            raise ValueError(f"Province must be one of: {allowed}.")
+        return cleaned
+    return str(value).strip()
 
 
 def _canonical_key(raw: str) -> str | None:
@@ -658,9 +739,12 @@ def _ask_field(field: str, current: Any, step: int, total: int, required: bool, 
     label = meta["label"]
     hint = meta.get("hint")
     default = meta.get("default")
+    choices: Sequence[tuple[str, str]] | None = meta.get("choices")
     _console_print(console, f"\n[{step}/{total}] {label}")
     if hint:
         _console_print(console, f"  {hint}")
+    if choices:
+        _print_choices(choices, console, meta.get("choices_label"))
     if _has_value(current):
         _console_print(console, f"  Current value: {_display_value(field, current)}")
     if default is not None and not _has_value(current):
@@ -685,6 +769,10 @@ def _ask_field(field: str, current: Any, step: int, total: int, required: bool, 
                 return "set", None
             _console_print(console, "  This field is required. Please enter a value or type ? for help.")
             continue
+        if choices:
+            matched = _match_choice(raw, choices)
+            if matched is not None:
+                return "set", _coerce_for_field(field, matched)
         try:
             return "set", _coerce_for_field(field, raw)
         except ValueError as exc:

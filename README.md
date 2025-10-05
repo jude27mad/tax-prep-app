@@ -13,18 +13,18 @@ Comprehensive CRA-focused toolkit comprising:
 ## Project layout
 
 ```text
-.
-├── app
-│   ├── api/            # Preparer FastAPI application
-│   ├── core/           # Domain models, calculators, validators
-│   ├── efile/          # XML builders, transmission client, retention logic
-│   ├── main.py         # Estimator FastAPI application
-│   ├── lifespan.py     # Shared startup/shutdown manager
-│   └── schemas/        # CRA XSD cache (T619, T1, T183, etc.)
-├── docs/               # Operational guidance (e.g., CRA suitability checklist)
-├── scripts/            # Replay, reject scan, coverage gate, IFT mock, purge jobs
-├── tests/              # Unit, e2e, golden XML, fuzz suites
-└── requirements.txt
+|-- app/
+|   |-- api/            # Preparer FastAPI application
+|   |-- core/           # Domain models, calculators, validators
+|   |-- efile/          # XML builders, transmission client, retention logic
+|   |-- main.py         # Estimator FastAPI application
+|   |-- lifespan.py     # Shared startup/shutdown manager
+|   `-- schemas/        # CRA XSD cache (T619, T1, T183, etc.)
+|-- docs/               # Operational guidance (e.g., CRA suitability checklist)
+|-- scripts/            # Replay, reject scan, coverage gate, IFT mock, purge jobs
+|-- tests/              # Unit, e2e, golden XML, fuzz suites
+`-- requirements.txt
+
 ```
 
 ## Quick start (single terminal)
@@ -78,7 +78,7 @@ when you are not using profiles.
 
 ## Provincial coverage
 
-The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, Manitoba, Saskatchewan, Nova Scotia, New Brunswick, Newfoundland and Labrador, Prince Edward Island, Yukon, Northwest Territories, and Nunavut (Qu�bec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
+The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, Manitoba, Saskatchewan, Nova Scotia, New Brunswick, Newfoundland and Labrador, Prince Edward Island, Yukon, Northwest Territories, and Nunavut (Québec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
 
 ## Running the APIs
 
