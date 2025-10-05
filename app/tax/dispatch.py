@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, Tuple
+from typing import Dict, List, Tuple
 
 from app.tax.prov.base import ProvincialAdapter
 from app.tax.prov.ab2025 import adapter as ab_2025
@@ -62,6 +62,20 @@ def get_provincial_adapter(year: int | str, province: str) -> ProvincialAdapter:
         raise UnknownProvinceError(f"No provincial adapter registered for {key[1]} in {key[0]}") from exc
 
 
-def list_supported_provinces(year: int | str) -> list[str]:
-    year_key = str(year)
-    return sorted(adapter.code for (yr, _), adapter in _REGISTRY.items() if yr == year_key)
+def list_provincial_adapters(year: int | str | None = None) -> List[ProvincialAdapter]:
+    target_year = str(year) if year is not None else _YEAR
+    seen: set[str] = set()
+    adapters: List[ProvincialAdapter] = []
+    for (registered_year, code), adapter in _REGISTRY.items():
+        if registered_year != target_year:
+            continue
+        if code in seen:
+            continue
+        adapters.append(adapter)
+        seen.add(code)
+    return adapters
+
+def list_supported_provinces(year: int | str | None = None) -> list[str]:
+    # reuse the adapters list to keep de-dupe logic consistent
+    return sorted(a.code for a in list_provincial_adapters(year))
+  
