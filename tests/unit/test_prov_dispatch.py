@@ -5,7 +5,7 @@ from app.tax.dispatch import (
     get_provincial_adapter,
     list_provincial_adapters,
     list_supported_provinces,
-
+    NEXT_TAX_YEAR,  # fix F821: import the constant used below
 )
 from app.tax.on2025 import (
     ON_BPA_2025,
