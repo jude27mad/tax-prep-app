@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from app.wizard import (
     BASE_DIR,
     CLI_BOOL_FIELDS,
-    CLI_INT_FIELDS,
     CLI_NUMERIC_FIELDS,
     CLI_SAVE_ORDER,
     CLI_SUBMIT_FIELDS,
