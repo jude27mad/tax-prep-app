@@ -1,41 +1,56 @@
 import argparse
-import csv
-import json
 import os
 import re
 import sys
 import textwrap
-from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, NotRequired, Sequence, TypedDict
-
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
-    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-
 from fastapi import FastAPI
 
 from app.config import get_settings
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 from app.lifespan import build_application_lifespan
 
-from app.tax.ca2025 import (
-    FEDERAL_2025,
-    FED_CREDIT_RATE,
-    federal_bpa_2025,
-    tax_from_brackets as fed_tax,
+from app.wizard import (
+    BASE_DIR,
+    CLI_BOOL_FIELDS,
+    CLI_INT_FIELDS,
+    CLI_NUMERIC_FIELDS,
+    CLI_SAVE_ORDER,
+    CLI_SUBMIT_FIELDS,
+    T4EstimateRequest,
+    canonicalize_data as _canonicalize_data_impl,
+    canonicalize_with_metadata as _canonicalize_with_metadata_impl,
+    delete_profile as _delete_profile,
+    estimate_from_t4 as _estimate_from_t4,
+    expected_cpp_contributions as _expected_cpp_contributions,  # noqa: F401 - required by tests
+    expected_ei_contribution as _expected_ei_contribution,      # noqa: F401 - required by tests
+    get_active_profile as _get_active_profile,
+    list_profiles as _list_profiles,
+    load_profile as _load_profile,
+    load_data_file as _load_data_file_impl,
+    parse_bool,
+    parse_freeform_text as _parse_freeform_text_impl,
+    parse_number,
+    round_cents as _round_cents,
+    rename_profile as _rename_profile,
+    restore_profile as _restore_profile,
+    save_profile_data as _save_profile_data,
+    set_active_profile as _set_active_profile,
+    slugify as _slugify,
 )
+from app.wizard.estimator import compute_tax_summary as _compute_tax_summary
+from app.wizard.profiles import INBOX_DIR
+from app.ui import router as ui_router
 from app.tax.dispatch import (
-    UnknownProvinceError,
-    get_provincial_adapter,
     list_provincial_adapters,
 )
+
 
 def _load_rich_modules():
     try:
@@ -47,11 +62,8 @@ def _load_rich_modules():
     except Exception:  # pragma: no cover - optional dependency
         return None, None, None, None
 
+
 RichConsole, RichPanel, RichTable, RichText = _load_rich_modules()
-
-
-
-
 
 app = FastAPI(
     title="Tax App",
@@ -59,110 +71,7 @@ app = FastAPI(
     lifespan=build_application_lifespan("estimator"),
 )
 
-CPP_BASE_EXEMPTION = 3_500.0
-CPP_YMPE_2025 = 71_300.0
-CPP_YAMPE_2025 = 81_200.0
-CPP_RATE_2025 = 0.0595
-CPP2_RATE_2025 = 0.04
-EI_MIE_2025 = 65_700.0
-EI_RATE_2025 = 0.0164
-_TOLERANCE = 0.05  # forgive minor payroll rounding
-_CENT = Decimal("0.01")
-
-
-def _to_decimal(value: float | Decimal) -> Decimal:
-    return value if isinstance(value, Decimal) else Decimal(str(value))
-
-
-def _round_cents(value: float | Decimal) -> float:
-    return float(_to_decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP))
-
-
-
-
-def _compute_tax_summary(income: float, rrsp: float, province: str) -> dict:
-    taxable = max(0.0, income - max(rrsp, 0.0))
-
-    federal_before = fed_tax(taxable, FEDERAL_2025)
-    fed_bpa = federal_bpa_2025(taxable)
-    federal_after = max(0.0, _round_cents(federal_before - FED_CREDIT_RATE * fed_bpa))
-
-    province_code = (province or "ON").upper()
-    try:
-        adapter = get_provincial_adapter(2025, province_code)
-    except UnknownProvinceError as exc:
-        raise ValueError(str(exc)) from exc
-
-    provincial = adapter.compute(taxable)
-    total_net_tax = _round_cents(_to_decimal(federal_after) + _to_decimal(provincial.net_tax))
-
-    return {
-        "income": income,
-        "rrsp": rrsp,
-        "taxable_income": taxable,
-        "province": provincial.province_code,
-        "federal": {
-            "before_credits": federal_before,
-            "bpa_used": fed_bpa,
-            "after_credits": federal_after,
-        },
-        "provincial": {
-            "province_code": provincial.province_code,
-            "province_name": provincial.province_name,
-            "before_credits": provincial.before_credits,
-            "bpa_used": provincial.bpa_used,
-            "credit_rate": provincial.credit_rate,
-            "after_credits": provincial.after_credits,
-            "additions": provincial.additions,
-            "net_provincial": provincial.net_tax,
-        },
-        "total_net_tax": total_net_tax,
-    }
-
-
-
-
-
-
-def _expected_cpp_contributions(income: float) -> tuple[float, float]:
-    income_dec = _to_decimal(income)
-    ympe = _to_decimal(CPP_YMPE_2025)
-    base = _to_decimal(CPP_BASE_EXEMPTION)
-    pensionable = max(Decimal("0"), min(income_dec, ympe) - base)
-    cpp_regular = _round_cents(pensionable * _to_decimal(CPP_RATE_2025))
-
-    yamp = _to_decimal(CPP_YAMPE_2025)
-    additional_earnings = max(Decimal("0"), min(income_dec, yamp) - ympe)
-    cpp_additional = _round_cents(additional_earnings * _to_decimal(CPP2_RATE_2025))
-
-    return cpp_regular, cpp_additional
-
-
-def _expected_ei_contribution(income: float) -> float:
-    income_dec = _to_decimal(income)
-    mie = _to_decimal(EI_MIE_2025)
-    rate = _to_decimal(EI_RATE_2025)
-    return _round_cents(min(income_dec, mie) * rate)
-
-
-def _within_limit(actual: float, maximum: float) -> bool:
-    return actual <= maximum + _TOLERANCE
-
-
-def _contribution_status(actual: float, maximum: float) -> str:
-    if actual > maximum + _TOLERANCE:
-        return "over"
-    if actual < max(0.0, maximum - _TOLERANCE):
-        return "under"
-    return "ok"
-
-
-@app.get("/health")
-def health():
-    settings = getattr(app.state, "settings", get_settings())
-    schema_versions = getattr(app.state, "schema_versions", {})
-    last_sbmt_ref_id = getattr(app.state, "last_sbmt_ref_id", None)
-    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml, "sbmt_ref_id_last": last_sbmt_ref_id}, "schemas": schema_versions}
+app.include_router(ui_router)
 
 
 @app.get("/tax/estimate")
@@ -170,124 +79,27 @@ def estimate(income: float, rrsp: float = 0.0, province: str = "ON"):
     return _compute_tax_summary(income, rrsp, province)
 
 
-class T4EstimateRequest(BaseModel):
-    box14: float = Field(
-        ...,
-        ge=0,
-        description="Employment income (T4 box 14)",
-        validation_alias=AliasChoices("box14", "box14_employment_income"),
-    )
-    box22: float = Field(
-        ...,
-        ge=0,
-        description="Income tax deducted (T4 box 22)",
-        validation_alias=AliasChoices("box22", "box22_tax_withheld"),
-    )
-    box16: float = Field(
-        ...,
-        ge=0,
-        description="CPP contributions (T4 box 16)",
-        validation_alias=AliasChoices("box16", "box16_cpp"),
-    )
-    box16a: float = Field(
-        0.0,
-        ge=0,
-        description="Second CPP contributions (T4 box 16A)",
-        validation_alias=AliasChoices("box16a", "box16A", "box16A_cpp2", "box16_cpp2", "box16a_cpp2"),
-    )
-    box18: float = Field(
-        ...,
-        ge=0,
-        description="EI premiums (T4 box 18)",
-        validation_alias=AliasChoices("box18", "box18_ei"),
-    )
-    rrsp: float = Field(
-        0.0,
-        ge=0,
-        description="RRSP deductions claimed",
-        validation_alias=AliasChoices("rrsp", "rrsp_deduction"),
-    )
-    province: str = Field("ON", description="Province code, defaults to ON")
-
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
-
-
 @app.post("/tax/t4")
 @app.post("/t4/estimate")
 def estimate_from_t4(payload: T4EstimateRequest):
-    tax_summary = _compute_tax_summary(payload.box14, payload.rrsp, payload.province)
-    total_tax = tax_summary["total_net_tax"]
-    total_tax_dec = _to_decimal(total_tax)
-    withheld = _round_cents(payload.box22)
-    balance = _round_cents(total_tax_dec - _to_decimal(withheld))
+    return _estimate_from_t4(payload)
 
-    cpp_max, cpp2_max = _expected_cpp_contributions(payload.box14)
-    ei_max = _expected_ei_contribution(payload.box14)
 
-    cpp_actual = _round_cents(payload.box16)
-    cpp2_actual = _round_cents(payload.box16a)
-    ei_actual = _round_cents(payload.box18)
-
+@app.get("/health")
+def health():
+    settings = getattr(app.state, "settings", get_settings())
+    schema_versions = getattr(app.state, "schema_versions", {})
+    last_sbmt_ref_id = getattr(app.state, "last_sbmt_ref_id", None)
     return {
-        "inputs": {
-            "box14": payload.box14,
-            "box22": payload.box22,
-            "box16": payload.box16,
-            "box16A": payload.box16a,
-            "box18": payload.box18,
-            "rrsp": payload.rrsp,
-            "province": payload.province,
+        "ok": True,
+        "build": {
+            "version": settings.build_version,
+            "sha": settings.build_sha,
+            "feature_efile_xml": settings.feature_efile_xml,
+            "sbmt_ref_id_last": last_sbmt_ref_id,
         },
-        "tax": tax_summary,
-        "total_tax": total_tax,
-        "withholding": withheld,
-        "balance": balance,
-        "balance_positive_is_amount_owing": balance > 0,
-        "is_refund": balance < 0,
-        "cpp": {
-            "reported": cpp_actual,
-            "maximum_allowed": cpp_max,
-            "within_limit": _within_limit(cpp_actual, cpp_max),
-            "status": _contribution_status(cpp_actual, cpp_max),
-        },
-        "cpp2": {
-            "reported": cpp2_actual,
-            "maximum_allowed": cpp2_max,
-            "within_limit": _within_limit(cpp2_actual, cpp2_max),
-            "status": _contribution_status(cpp2_actual, cpp2_max),
-        },
-        "ei": {
-            "reported": ei_actual,
-            "maximum_allowed": ei_max,
-            "within_limit": _within_limit(ei_actual, ei_max),
-            "status": _contribution_status(ei_actual, ei_max),
-        },
+        "schemas": schema_versions,
     }
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-INBOX_DIR = BASE_DIR / "inbox"
-PROFILES_DIR = BASE_DIR / "profiles"
-PROFILE_HISTORY_DIR = PROFILES_DIR / "history"
-PROFILE_TRASH_DIR = PROFILES_DIR / ".trash"
-DEFAULT_PROFILE_FILE = PROFILES_DIR / "active_profile.txt"
-
-CLI_SUBMIT_FIELDS = {"box14", "box22", "box16", "box16a", "box18", "rrsp", "province"}
-CLI_NUMERIC_FIELDS = {"box14", "box22", "box16", "box16a", "box18", "rrsp"}
-CLI_INT_FIELDS = {"num_dependents"}
-CLI_BOOL_FIELDS = {"dependents"}
-CLI_SAVE_ORDER = [
-    "full_name",
-    "province",
-    "box14",
-    "box22",
-    "box16",
-    "box16a",
-    "box18",
-    "rrsp",
-    "filing_status",
-    "dependents",
-    "num_dependents",
-]
 
 
 class PromptStep(TypedDict):
@@ -302,161 +114,6 @@ class ImportPreview(TypedDict, total=False):
 
 
 ColorPreference = Literal["auto", "always", "never"]
-
-
-def _slugify(value: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return cleaned or "profile"
-
-
-def _ensure_profiles_dirs() -> None:
-    for directory in (PROFILES_DIR, PROFILE_HISTORY_DIR, PROFILE_TRASH_DIR):
-        directory.mkdir(parents=True, exist_ok=True)
-
-
-def _profile_path(slug: str) -> Path:
-    return PROFILES_DIR / f"{slug}.toml"
-
-
-def _history_dir(slug: str) -> Path:
-    return PROFILE_HISTORY_DIR / slug
-
-
-def _load_profile(slug: str | None) -> tuple[dict[str, Any], Path | None, list[str]]:
-    if not slug:
-        return {}, None, []
-    _ensure_profiles_dirs()
-    path = _profile_path(slug)
-    if not path.exists():
-        return {}, None, []
-    errors: list[str] = []
-    try:
-        with path.open("rb") as handle:
-            raw = tomllib.load(handle)
-    except Exception as exc:  # pragma: no cover - corrupt file
-        errors.append(f"{path.name}: {exc}")
-        return {}, path, errors
-    try:
-        data = _canonicalize_data(raw)
-    except ValueError as exc:
-        errors.append(f"{path.name}: {exc}")
-        data = {}
-    return data, path, errors
-
-
-def _snapshot_profile(slug: str, path: Path) -> None:
-    if not path.exists():
-        return
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    history_dir = _history_dir(slug)
-    history_dir.mkdir(parents=True, exist_ok=True)
-    snapshot = history_dir / f"{timestamp}.toml"
-    snapshot.write_bytes(path.read_bytes())
-
-
-def _trash_profile(slug: str, path: Path) -> Path | None:
-    if not path.exists():
-        return None
-    _ensure_profiles_dirs()
-    PROFILE_TRASH_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    dest = PROFILE_TRASH_DIR / f"{slug}-{timestamp}.toml"
-    path.replace(dest)
-    return dest
-
-
-def _list_profiles() -> list[str]:
-    if not PROFILES_DIR.exists():
-        return []
-    return sorted(p.stem for p in PROFILES_DIR.glob("*.toml") if p.is_file())
-
-
-def _list_trash(slug: str | None = None) -> list[Path]:
-    if not PROFILE_TRASH_DIR.exists():
-        return []
-    files = [p for p in PROFILE_TRASH_DIR.glob("*.toml") if p.is_file()]
-    if slug:
-        prefix = f"{slug}-"
-        files = [p for p in files if p.name.startswith(prefix)]
-    return sorted(files)
-
-
-def _set_active_profile(slug: str | None) -> None:
-    _ensure_profiles_dirs()
-    if slug is None:
-        if DEFAULT_PROFILE_FILE.exists():
-            DEFAULT_PROFILE_FILE.unlink()
-        return
-    DEFAULT_PROFILE_FILE.write_text(slug + "\n", encoding="utf-8")
-
-
-def _get_active_profile() -> str | None:
-    if DEFAULT_PROFILE_FILE.exists():
-        content = DEFAULT_PROFILE_FILE.read_text(encoding="utf-8").strip()
-        return content or None
-    return None
-
-
-def _save_profile_data(slug: str, data: dict[str, Any]) -> Path:
-    _ensure_profiles_dirs()
-    path = _profile_path(slug)
-    if path.exists():
-        _snapshot_profile(slug, path)
-    _save_user_data(data, path)
-    _set_active_profile(slug)
-    return path
-
-
-def _delete_profile(slug: str) -> Path | None:
-    path = _profile_path(slug)
-    if not path.exists():
-        return None
-    trashed = _trash_profile(slug, path)
-    if _get_active_profile() == slug:
-        _set_active_profile(None)
-    return trashed
-
-
-def _restore_profile(slug: str) -> Path | None:
-    candidates = _list_trash(slug)
-    if not candidates:
-        return None
-    candidate = candidates[-1]
-    _ensure_profiles_dirs()
-    dest = _profile_path(slug)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(candidate.read_bytes())
-    candidate.unlink()
-    return dest
-
-
-def _rename_profile(slug: str, new_slug: str) -> tuple[Path | None, Path | None]:
-    if slug == new_slug:
-        return _profile_path(slug), None
-    old_path = _profile_path(slug)
-    if not old_path.exists():
-        return None, None
-    new_path = _profile_path(new_slug)
-    if new_path.exists():
-        raise ValueError(f"Profile '{new_slug}' already exists.")
-    new_path.parent.mkdir(parents=True, exist_ok=True)
-    new_path.write_bytes(old_path.read_bytes())
-    old_path.unlink()
-    old_history = _history_dir(slug)
-    new_history = _history_dir(new_slug)
-    if old_history.exists():
-        new_history.parent.mkdir(parents=True, exist_ok=True)
-        if new_history.exists():
-            for item in old_history.glob('*'):
-                target = new_history / item.name
-                target.write_bytes(item.read_bytes())
-                item.unlink()
-            old_history.rmdir()
-        else:
-            old_history.rename(new_history)
-    if _get_active_profile() == slug:
-        _set_active_profile(new_slug)
-    return new_path, new_history
 
 
 def _resolve_color_preference(pref: ColorPreference) -> ColorPreference:
@@ -476,6 +133,7 @@ def _get_console(pref: ColorPreference):
         return RichConsole(force_terminal=force_terminal)
     except Exception:  # pragma: no cover - console init failure
         return None
+
 
 def _console_print(console, message: str) -> None:
     if console is not None:
@@ -555,7 +213,9 @@ def _print_changes_summary(before: dict[str, Any], after: dict[str, Any], consol
         table = _build_table("Updated answers", ["field", "before", "after"])
         if table is not None:
             for key, old, new in changes:
-                table.add_row(key, _display_value(key, old) or "<empty>", _display_value(key, new) or "<empty>")
+                table.add_row(
+                    key, _display_value(key, old) or "<empty>", _display_value(key, new) or "<empty>"
+                )
             console.print(table)
             return
     _console_print(console, "\nUpdated answers:")
@@ -594,7 +254,11 @@ for canonical, aliases in _FIELD_ALIASES.items():
             _ALIAS_MATCHERS.append((cleaned, canonical))
 
 # Deduplicate while keeping longest aliases first so "box 16a" matches before "box 16"
-_ALIAS_MATCHERS = sorted({alias: canonical for alias, canonical in _ALIAS_MATCHERS}.items(), key=lambda item: len(item[0]), reverse=True)
+_ALIAS_MATCHERS = sorted(
+    {alias: canonical for alias, canonical in _ALIAS_MATCHERS}.items(),
+    key=lambda item: len(item[0]),
+    reverse=True,
+)
 
 _HELP_TOPICS: dict[str, str] = {
     "overview": textwrap.dedent(
@@ -815,9 +479,10 @@ _FIELD_METADATA: dict[str, dict[str, Any]] = {
     },
 }
 
+# Province choices (2025)
 _PROVINCE_ADAPTERS = tuple(list_provincial_adapters(2025))
 _PROVINCE_CHOICES: tuple[tuple[str, str], ...] = tuple(
-    (adapter.code, adapter.name) for adapter in _PROVINCE_ADAPTERS
+    (a.code, a.name) for a in _PROVINCE_ADAPTERS
 )
 _FIELD_METADATA["province"]["choices"] = _PROVINCE_CHOICES
 _FIELD_METADATA["province"]["choices_label"] = "Available provinces and territories"
@@ -860,31 +525,11 @@ def _display_value(field: str, value: Any) -> str:
 
 
 def _parse_number(text: str) -> float:
-    cleaned = text.strip().lower()
-    if not cleaned:
-        raise ValueError("Please enter a number.")
-    multiplier = 1.0
-    suffix = cleaned[-1]
-    if suffix in NUM_SUFFIXES:
-        multiplier = NUM_SUFFIXES[suffix]
-        cleaned = cleaned[:-1]
-    cleaned = cleaned.replace("$", "").replace(",", "").replace(" ", "").replace("_", "")
-    cleaned = cleaned.replace("−", "-").replace("–", "-")
-    if cleaned in {"", "-", "."}:
-        raise ValueError("Please enter a number.")
-    try:
-        return float(cleaned) * multiplier
-    except ValueError as exc:  # pragma: no cover - defensive
-        raise ValueError(f"Could not understand number '{text}'.") from exc
+    return parse_number(text)
 
 
 def _parse_bool(text: str) -> bool:
-    lowered = text.strip().lower()
-    if lowered in {"y", "yes", "true", "1", "ok", "sure"}:
-        return True
-    if lowered in {"n", "no", "false", "0"}:
-        return False
-    raise ValueError("Enter yes or no.")
+    return parse_bool(text)
 
 
 def _match_choice(text: str, choices: Sequence[tuple[str, str]]) -> str | None:
@@ -938,110 +583,30 @@ def _canonical_key(raw: str) -> str | None:
 
 
 def _canonicalize_with_metadata(raw: Any) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
-    if not isinstance(raw, dict):
-        return {}, [], []
-    flattened = dict(raw)
-    t4_block = flattened.get("t4")
-    if isinstance(t4_block, dict):
-        flattened = {**flattened, **t4_block}
-    result: dict[str, Any] = {}
-    mapping: list[tuple[str, str]] = []
-    unknown: list[str] = []
-    for key, value in flattened.items():
-        canonical = _canonical_key(str(key))
-        if not canonical:
-            unknown.append(str(key))
-            continue
-        try:
-            coerced = _coerce_for_field(canonical, value)
-        except ValueError as exc:
-            raise ValueError(f"Field '{key}': {exc}") from exc
-        if coerced is not None:
-            result[canonical] = coerced
-            mapping.append((str(key), canonical))
-    return result, mapping, unknown
-
+    return _canonicalize_with_metadata_impl(raw)
 
 
 def _canonicalize_data(raw: Any) -> dict[str, Any]:
-    data, _, _ = _canonicalize_with_metadata(raw)
-    return data
+    return _canonicalize_data_impl(raw)
 
 
 def _parse_freeform_text(text: str) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
-    result: dict[str, Any] = {}
-    mapping: list[tuple[str, str]] = []
-    unknown: list[str] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = _KEY_VALUE_RE.match(line)
-        if match:
-            raw_key, raw_value = match.groups()
-            canonical = _canonical_key(raw_key)
-            if canonical:
-                result[canonical] = _coerce_for_field(canonical, raw_value.strip())
-                mapping.append((raw_key.strip(), canonical))
-            else:
-                unknown.append(raw_key.strip())
-            continue
-        lowered = " ".join(line.lower().split())
-        matched = False
-        for alias, canonical in _ALIAS_MATCHERS:
-            if lowered.startswith(alias):
-                remainder = line[len(alias):].lstrip(" :=-")
-                if not remainder:
-                    continue
-                result[canonical] = _coerce_for_field(canonical, remainder.strip())
-                mapping.append((alias, canonical))
-                matched = True
-                break
-        if not matched:
-            unknown.append(line)
-    return result, mapping, unknown
+    return _parse_freeform_text_impl(text)
 
 
 def _read_data_file(path: Path) -> tuple[dict[str, Any], ImportPreview]:
-    suffix = path.suffix.lower()
-    preview: ImportPreview = {"mapping": [], "unknown": [], "source": _friendly_path(path)}
     try:
-        if suffix == ".toml":
-            with path.open("rb") as handle:
-                raw = tomllib.load(handle)
-            data, mapping, unknown = _canonicalize_with_metadata(raw)
-            preview["mapping"] = mapping
-            preview["unknown"] = unknown
-            return data, preview
-        if suffix == ".json":
-            with path.open(encoding="utf-8") as handle:
-                raw = json.load(handle)
-            data, mapping, unknown = _canonicalize_with_metadata(raw)
-            preview["mapping"] = mapping
-            preview["unknown"] = unknown
-            return data, preview
-        if suffix == ".txt":
-            text_content = path.read_text(encoding="utf-8")
-            data, mapping, unknown = _parse_freeform_text(text_content)
-            preview["mapping"] = mapping
-            preview["unknown"] = unknown
-            return data, preview
-        if suffix == ".csv":
-            with path.open(encoding="utf-8", newline="") as handle:
-                reader = csv.DictReader(handle)
-                try:
-                    row = next(reader)
-                except StopIteration:
-                    return {}, preview
-            data, mapping, unknown = _canonicalize_with_metadata(row)
-            preview["mapping"] = mapping
-            preview["unknown"] = unknown
-            return data, preview
+        data, preview = _load_data_file_impl(path)
     except ValueError as exc:
         raise ValueError(f"{path.name}: {exc}") from exc
     except Exception as exc:  # pragma: no cover - defensive catch for file decoding issues
         raise ValueError(f"{path.name}: {exc}") from exc
-    return {}, preview
+    normalized: ImportPreview = {
+        "mapping": preview.get("mapping", []),
+        "unknown": preview.get("unknown", []),
+        "source": _friendly_path(path),
+    }
+    return data, normalized
 
 
 def _default_candidate_paths() -> tuple[list[Path], list[Path]]:
@@ -1071,7 +636,9 @@ def _default_candidate_paths() -> tuple[list[Path], list[Path]]:
     return unique_supported, unsupported
 
 
-def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, list[Path], list[str], ImportPreview | None]:
+def _load_inputs(
+    path_value: str | None,
+) -> tuple[dict[str, Any], Path | None, list[Path], list[str], ImportPreview | None]:
     errors: list[str] = []
     unsupported: list[Path] = []
     candidates: list[Path] = []
@@ -1094,7 +661,9 @@ def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, l
     return {}, None, unsupported, errors, None
 
 
-def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, console=None) -> dict[str, Any]:
+def _prompt_for_missing_fields(
+    data: dict[str, Any], *, quick: bool = False, console=None
+) -> dict[str, Any]:
     working = {key: _coerce_for_field(key, value) for key, value in data.items()}
     steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
     if quick:
@@ -1131,8 +700,9 @@ def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, con
     return working
 
 
-
-def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) -> tuple[dict[str, Any] | None, bool]:
+def _review_answers(
+    starting: dict[str, Any], answers: dict[str, Any], console
+) -> tuple[dict[str, Any] | None, bool]:
     """Return (final_answers, restart_requested)."""
     while True:
         if RichTable is not None and console is not None:
@@ -1165,10 +735,14 @@ def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) 
             elif action == "skip":
                 answers.pop(field, None)
             continue
-        _console_print(console, "  Command not recognized. Try a field name, 'restart', or Enter to accept.")
+        _console_print(
+            console, "  Command not recognized. Try a field name, 'restart', or Enter to accept."
+        )
 
 
-def _ask_field(field: str, current: Any, step: int, total: int, required: bool, console) -> tuple[str, Any]:
+def _ask_field(
+    field: str, current: Any, step: int, total: int, required: bool, console
+) -> tuple[str, Any]:
     meta = _FIELD_METADATA[field]
     label = meta["label"]
     hint = meta.get("hint")
@@ -1201,7 +775,9 @@ def _ask_field(field: str, current: Any, step: int, total: int, required: bool, 
                 return "set", _coerce_for_field(field, default)
             if not required:
                 return "set", None
-            _console_print(console, "  This field is required. Please enter a value or type ? for help.")
+            _console_print(
+                console, "  This field is required. Please enter a value or type ? for help."
+            )
             continue
         if choices:
             matched = _match_choice(raw, choices)
@@ -1275,10 +851,11 @@ def _save_user_data(data: dict[str, Any], path: Path) -> None:
         elif key in CLI_INT_FIELDS:
             lines.append(f"{key} = {int(value)}")
         else:
-            escaped = str(value).replace("\"", "\\\"")
-            lines.append(f"{key} = \"{escaped}\"")
+            escaped = str(value).replace('"', '\\"')
+            lines.append(f'{key} = "{escaped}"')
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nSaved your answers to {_friendly_path(path)}")
+
 
 def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) -> None:
     action = (subargs[0].lower() if subargs else "list")
@@ -1331,7 +908,10 @@ def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) 
                 _console_print(console, f"ERROR: {message}")
             return
         if not path_obj:
-            _console_print(console, f"Profile '{slug}' does not exist yet. Run the wizard with --profile {slug} to create it.")
+            _console_print(
+                console,
+                f"Profile '{slug}' does not exist yet. Run the wizard with --profile {slug} to create it.",
+            )
             return
         _set_active_profile(slug)
         _console_print(console, f"Active profile set to '{slug}'.")
@@ -1372,8 +952,6 @@ def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) 
         _console_print(console, f"Renamed profile '{old_slug}' to '{new_slug}'.")
         return
     _console_print(console, "Unknown profiles command. Available: list, show, switch, delete, restore, rename.")
-
-
 
 
 def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console) -> None:
@@ -1430,6 +1008,8 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         if status:
             line += f" - status: {status}"
         _console_print(console, line)
+
+
 def _run_wizard(
     data_path: str | None,
     *,
@@ -1475,7 +1055,9 @@ def _run_wizard(
         if reviewed is not None:
             answers = reviewed
             break
-    payload_data = {key: value for key, value in answers.items() if key in CLI_SUBMIT_FIELDS and value is not None}
+    payload_data = {
+        key: value for key, value in answers.items() if key in CLI_SUBMIT_FIELDS and value is not None
+    }
     try:
         payload = T4EstimateRequest.model_validate(payload_data)
     except ValidationError as exc:
@@ -1548,7 +1130,10 @@ def main(argv: list[str] | None = None) -> None:
     profile_slug = _slugify(args.profile) if args.profile else _get_active_profile()
     profile_data, _, profile_errors = _load_profile(profile_slug)
     if profile_slug and not profile_data and not profile_errors:
-        _console_print(console, f"Profile '{profile_slug}' does not exist yet; it will be created when you save.")
+        _console_print(
+            console,
+            f"Profile '{profile_slug}' does not exist yet; it will be created when you save.",
+        )
     _run_wizard(
         args.data,
         allow_save=not args.no_save,
@@ -1560,7 +1145,5 @@ def main(argv: list[str] | None = None) -> None:
     )
 
 
-
 if __name__ == "__main__":
     main()
-

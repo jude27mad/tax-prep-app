@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tax App UI</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        background-color: #f7f7f9;
+        color: #222;
+      }
+      header {
+        background: #1e3a8a;
+        color: white;
+        padding: 1rem 2rem;
+        font-size: 1.35rem;
+      }
+      main {
+        padding: 2rem;
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      a {
+        color: #1e3a8a;
+      }
+      .btn {
+        display: inline-flex;
+        gap: 0.25rem;
+        align-items: center;
+        border: 1px solid #1e3a8a;
+        background: white;
+        color: #1e3a8a;
+        padding: 0.35rem 0.75rem;
+        border-radius: 0.4rem;
+        font-size: 0.9rem;
+        cursor: pointer;
+      }
+      .btn.danger {
+        border-color: #b91c1c;
+        color: #b91c1c;
+      }
+      .btn.secondary {
+        border-color: #4b5563;
+        color: #4b5563;
+      }
+      form.inline {
+        display: inline;
+      }
+      .card {
+        background: white;
+        border-radius: 0.6rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+        margin-bottom: 1.5rem;
+      }
+      .messages {
+        margin-bottom: 1rem;
+      }
+      .messages li {
+        padding: 0.5rem 0.75rem;
+        background: #ecfeff;
+        border: 1px solid #22d3ee;
+        border-radius: 0.4rem;
+        margin-bottom: 0.5rem;
+        list-style: none;
+      }
+      table.striped {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      table.striped th,
+      table.striped td {
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      table.striped tr:nth-child(odd) {
+        background: #f9fafb;
+      }
+      .preview {
+        border-radius: 0.6rem;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        padding: 1rem;
+      }
+    </style>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <header>Tax App – Guided UI</header>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

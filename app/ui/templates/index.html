@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="card">
+    <h2>Profiles</h2>
+    {% if profiles %}
+      <table class="striped">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for slug in profiles %}
+            <tr>
+              <td>
+                {% if active == slug %}
+                  <strong>{{ slug }}</strong> <span style="color:#16a34a;">(active)</span>
+                {% else %}
+                  {{ slug }}
+                {% endif %}
+              </td>
+              <td>
+                <a class="btn" href="/ui/profiles/{{ slug }}">Open</a>
+                <form class="inline" method="post" action="/ui/profiles/{{ slug }}/set-active">
+                  <button type="submit" class="btn secondary">Set active</button>
+                </form>
+                <form class="inline" method="post" action="/ui/profiles/{{ slug }}/delete" onsubmit="return confirm('Move this profile to trash?');">
+                  <button type="submit" class="btn danger">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No profiles saved yet. Create one below to get started.</p>
+    {% endif %}
+    <h3>Create a new profile</h3>
+    <form method="post" action="/ui/profiles">
+      <label for="profile-name">Profile name</label><br />
+      <input id="profile-name" name="name" type="text" required placeholder="e.g., alice" />
+      <button type="submit" class="btn">Create</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Recently deleted</h2>
+    {% if trashed %}
+      <table class="striped">
+        <thead>
+          <tr>
+            <th>Profile</th>
+            <th>Deleted</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in trashed %}
+            <tr>
+              <td>{{ entry.slug }}</td>
+              <td>
+                {% if entry.timestamp %}
+                  {{ entry.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>
+                <form class="inline" method="post" action="/ui/profiles/{{ entry.slug }}/restore">
+                  <button type="submit" class="btn">Restore</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>The trash is empty.</p>
+    {% endif %}
+  </div>
+{% endblock %}
