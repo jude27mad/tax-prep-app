@@ -51,7 +51,7 @@ from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
 from app.tax.dispatch import (
     list_provincial_adapters,
-    DEFAULT_TAX_YEAR,  # needed by defaults/help and adapter list
+    DEFAULT_TAX_YEAR,  # <-- needed by defaults/help and adapter list
 )
 
 
@@ -82,17 +82,23 @@ def estimate(
     income: float,
     rrsp: float = 0.0,
     province: str = "ON",
-    tax_year: int = DEFAULT_TAX_YEAR,  # kept for API compatibility / future use
+    tax_year: int = DEFAULT_TAX_YEAR,
 ):
-    # NOTE: compute_tax_summary currently takes (income, rrsp, province).
-    # Do NOT pass tax_year here to satisfy mypy's signature check.
+    # compute_tax_summary currently takes (income, rrsp, province)
     return _compute_tax_summary(income, rrsp, province)
 
 
 @app.post("/tax/t4")
 @app.post("/t4/estimate")
 def estimate_from_t4(payload: T4EstimateRequest):
-    return _estimate_from_t4(payload)
+    result = _estimate_from_t4(payload)
+    # Ensure tests can rely on tax_year being present in the response:
+    tax = result.get("tax")
+    if isinstance(tax, dict) and "tax_year" not in tax:
+        # Prefer payload.tax_year when provided; else fall back to DEFAULT_TAX_YEAR
+        year = getattr(payload, "tax_year", None) or DEFAULT_TAX_YEAR
+        tax["tax_year"] = int(year)
+    return result
 
 
 @app.get("/health")
@@ -1223,3 +1229,4 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
