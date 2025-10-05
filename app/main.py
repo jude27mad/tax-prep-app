@@ -51,7 +51,7 @@ from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
 from app.tax.dispatch import (
     list_provincial_adapters,
-    DEFAULT_TAX_YEAR,  # <-- needed by defaults/help and adapter list
+    DEFAULT_TAX_YEAR,  # needed by defaults/help and adapter list
 )
 
 
@@ -82,9 +82,11 @@ def estimate(
     income: float,
     rrsp: float = 0.0,
     province: str = "ON",
-    tax_year: int = DEFAULT_TAX_YEAR,
+    tax_year: int = DEFAULT_TAX_YEAR,  # kept for API compatibility / future use
 ):
-    return _compute_tax_summary(income, rrsp, province, tax_year)
+    # NOTE: compute_tax_summary currently takes (income, rrsp, province).
+    # Do NOT pass tax_year here to satisfy mypy's signature check.
+    return _compute_tax_summary(income, rrsp, province)
 
 
 @app.post("/tax/t4")
@@ -1221,4 +1223,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
