@@ -28,6 +28,8 @@ from app.wizard import (
     canonicalize_with_metadata as _canonicalize_with_metadata_impl,
     delete_profile as _delete_profile,
     estimate_from_t4 as _estimate_from_t4,
+    expected_cpp_contributions as _expected_cpp_contributions,  # required by tests
+    expected_ei_contribution as _expected_ei_contribution,      # required by tests
     get_active_profile as _get_active_profile,
     list_profiles as _list_profiles,
     load_profile as _load_profile,
