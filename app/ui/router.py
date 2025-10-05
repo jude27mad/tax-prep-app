@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
+from starlette.datastructures import UploadFile  # for type-narrowing form inputs
 
 from app.wizard import (
     BASE_DIR,
@@ -102,6 +103,16 @@ def _friendly_profile_path(slug: str) -> str:
         return str(profile_path)
 
 
+def _form_text(val: Any) -> str:
+    """Return a safe text value from a form field which might be UploadFile | str | None."""
+    if isinstance(val, UploadFile):
+        # For text fields, treat file inputs as empty string; or use filename if you prefer.
+        return val.filename or ""
+    if val is None:
+        return ""
+    return str(val)
+
+
 def _extract_form_data(form: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     data: dict[str, Any] = {}
     errors: dict[str, str] = {}
@@ -111,6 +122,10 @@ def _extract_form_data(form: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
             continue
         raw_value = form.get(field)
         if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+            # If UploadFile, treat as empty too
+            if isinstance(raw_value, UploadFile):
+                data[field] = None
+                continue
             data[field] = None
             continue
         try:
@@ -227,7 +242,8 @@ def profiles_home(request: Request) -> HTMLResponse:
 @router.post("/profiles", response_class=RedirectResponse)
 async def create_profile(request: Request) -> RedirectResponse:
     form = await request.form()
-    name = (form.get("name") or "").strip()
+    # Safely coerce text (mypy fix for UploadFile | str)
+    name = _form_text(form.get("name")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
     slug = slugify(name)
@@ -265,7 +281,8 @@ def restore(slug: str) -> RedirectResponse:
 @router.post("/profiles/{slug}/rename", response_class=RedirectResponse)
 async def rename(slug: str, request: Request) -> RedirectResponse:
     form = await request.form()
-    new_name = (form.get("new_name") or "").strip()
+    # Safely coerce text (mypy fix for UploadFile | str)
+    new_name = _form_text(form.get("new_name")).strip()
     old_slug = slugify(slug)
     new_slug = slugify(new_name)
     if not new_slug:
@@ -315,7 +332,7 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
     form_dict = {key: form.get(key) for key in form.keys()}
     data, errors = _extract_form_data(form_dict)
     preview, preview_errors = _build_preview(data)
-    context = {
+    context: dict[str, Any] = {
         "request": request,
         "preview": preview,
         "preview_errors": preview_errors,
@@ -323,6 +340,6 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
     }
     if errors:
         # Display field-level errors at the top of the preview
-        context.setdefault("preview_errors", [])
-        context["preview_errors"].extend(errors.values())
+        pe = cast(list[str], context.setdefault("preview_errors", []))
+        pe.extend(list(errors.values()))
     return TEMPLATES.TemplateResponse("preview.html", context)
