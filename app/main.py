@@ -1,23 +1,14 @@
 import argparse
-import csv
-import json
 import os
 import re
 import sys
 import textwrap
-from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, NotRequired, Sequence, TypedDict
 
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
-    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
-
 
 from fastapi import FastAPI
 
@@ -35,14 +26,10 @@ from app.wizard import (
     T4EstimateRequest,
     canonicalize_data as _canonicalize_data_impl,
     canonicalize_with_metadata as _canonicalize_with_metadata_impl,
-    coerce_for_field as _coerce_for_field_impl,
     delete_profile as _delete_profile,
     estimate_from_t4 as _estimate_from_t4,
-    expected_cpp_contributions as _expected_cpp_contributions,
-    expected_ei_contribution as _expected_ei_contribution,
     get_active_profile as _get_active_profile,
     list_profiles as _list_profiles,
-    list_trash as _list_trash,
     load_profile as _load_profile,
     load_data_file as _load_data_file_impl,
     parse_bool,
@@ -52,7 +39,6 @@ from app.wizard import (
     rename_profile as _rename_profile,
     restore_profile as _restore_profile,
     save_profile_data as _save_profile_data,
-    save_user_data as _save_user_data,
     set_active_profile as _set_active_profile,
     slugify as _slugify,
 )
@@ -60,10 +46,9 @@ from app.wizard.estimator import compute_tax_summary as _compute_tax_summary
 from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
 from app.tax.dispatch import (
-    UnknownProvinceError,
-    get_provincial_adapter,
     list_provincial_adapters,
 )
+
 
 def _load_rich_modules():
     try:
@@ -75,11 +60,8 @@ def _load_rich_modules():
     except Exception:  # pragma: no cover - optional dependency
         return None, None, None, None
 
+
 RichConsole, RichPanel, RichTable, RichText = _load_rich_modules()
-
-
-
-
 
 app = FastAPI(
     title="Tax App",
@@ -106,7 +88,16 @@ def health():
     settings = getattr(app.state, "settings", get_settings())
     schema_versions = getattr(app.state, "schema_versions", {})
     last_sbmt_ref_id = getattr(app.state, "last_sbmt_ref_id", None)
-    return {"ok": True, "build": {"version": settings.build_version, "sha": settings.build_sha, "feature_efile_xml": settings.feature_efile_xml, "sbmt_ref_id_last": last_sbmt_ref_id}, "schemas": schema_versions}
+    return {
+        "ok": True,
+        "build": {
+            "version": settings.build_version,
+            "sha": settings.build_sha,
+            "feature_efile_xml": settings.feature_efile_xml,
+            "sbmt_ref_id_last": last_sbmt_ref_id,
+        },
+        "schemas": schema_versions,
+    }
 
 
 class PromptStep(TypedDict):
@@ -140,6 +131,7 @@ def _get_console(pref: ColorPreference):
         return RichConsole(force_terminal=force_terminal)
     except Exception:  # pragma: no cover - console init failure
         return None
+
 
 def _console_print(console, message: str) -> None:
     if console is not None:
@@ -219,7 +211,9 @@ def _print_changes_summary(before: dict[str, Any], after: dict[str, Any], consol
         table = _build_table("Updated answers", ["field", "before", "after"])
         if table is not None:
             for key, old, new in changes:
-                table.add_row(key, _display_value(key, old) or "<empty>", _display_value(key, new) or "<empty>")
+                table.add_row(
+                    key, _display_value(key, old) or "<empty>", _display_value(key, new) or "<empty>"
+                )
             console.print(table)
             return
     _console_print(console, "\nUpdated answers:")
@@ -258,7 +252,11 @@ for canonical, aliases in _FIELD_ALIASES.items():
             _ALIAS_MATCHERS.append((cleaned, canonical))
 
 # Deduplicate while keeping longest aliases first so "box 16a" matches before "box 16"
-_ALIAS_MATCHERS = sorted({alias: canonical for alias, canonical in _ALIAS_MATCHERS}.items(), key=lambda item: len(item[0]), reverse=True)
+_ALIAS_MATCHERS = sorted(
+    {alias: canonical for alias, canonical in _ALIAS_MATCHERS}.items(),
+    key=lambda item: len(item[0]),
+    reverse=True,
+)
 
 _HELP_TOPICS: dict[str, str] = {
     "overview": textwrap.dedent(
@@ -586,7 +584,6 @@ def _canonicalize_with_metadata(raw: Any) -> tuple[dict[str, Any], list[tuple[st
     return _canonicalize_with_metadata_impl(raw)
 
 
-
 def _canonicalize_data(raw: Any) -> dict[str, Any]:
     return _canonicalize_data_impl(raw)
 
@@ -637,7 +634,9 @@ def _default_candidate_paths() -> tuple[list[Path], list[Path]]:
     return unique_supported, unsupported
 
 
-def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, list[Path], list[str], ImportPreview | None]:
+def _load_inputs(
+    path_value: str | None,
+) -> tuple[dict[str, Any], Path | None, list[Path], list[str], ImportPreview | None]:
     errors: list[str] = []
     unsupported: list[Path] = []
     candidates: list[Path] = []
@@ -660,7 +659,9 @@ def _load_inputs(path_value: str | None) -> tuple[dict[str, Any], Path | None, l
     return {}, None, unsupported, errors, None
 
 
-def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, console=None) -> dict[str, Any]:
+def _prompt_for_missing_fields(
+    data: dict[str, Any], *, quick: bool = False, console=None
+) -> dict[str, Any]:
     working = {key: _coerce_for_field(key, value) for key, value in data.items()}
     steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
     if quick:
@@ -697,8 +698,9 @@ def _prompt_for_missing_fields(data: dict[str, Any], *, quick: bool = False, con
     return working
 
 
-
-def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) -> tuple[dict[str, Any] | None, bool]:
+def _review_answers(
+    starting: dict[str, Any], answers: dict[str, Any], console
+) -> tuple[dict[str, Any] | None, bool]:
     """Return (final_answers, restart_requested)."""
     while True:
         if RichTable is not None and console is not None:
@@ -731,10 +733,14 @@ def _review_answers(starting: dict[str, Any], answers: dict[str, Any], console) 
             elif action == "skip":
                 answers.pop(field, None)
             continue
-        _console_print(console, "  Command not recognized. Try a field name, 'restart', or Enter to accept.")
+        _console_print(
+            console, "  Command not recognized. Try a field name, 'restart', or Enter to accept."
+        )
 
 
-def _ask_field(field: str, current: Any, step: int, total: int, required: bool, console) -> tuple[str, Any]:
+def _ask_field(
+    field: str, current: Any, step: int, total: int, required: bool, console
+) -> tuple[str, Any]:
     meta = _FIELD_METADATA[field]
     label = meta["label"]
     hint = meta.get("hint")
@@ -767,7 +773,9 @@ def _ask_field(field: str, current: Any, step: int, total: int, required: bool, 
                 return "set", _coerce_for_field(field, default)
             if not required:
                 return "set", None
-            _console_print(console, "  This field is required. Please enter a value or type ? for help.")
+            _console_print(
+                console, "  This field is required. Please enter a value or type ? for help."
+            )
             continue
         if choices:
             matched = _match_choice(raw, choices)
@@ -841,10 +849,11 @@ def _save_user_data(data: dict[str, Any], path: Path) -> None:
         elif key in CLI_INT_FIELDS:
             lines.append(f"{key} = {int(value)}")
         else:
-            escaped = str(value).replace("\"", "\\\"")
-            lines.append(f"{key} = \"{escaped}\"")
+            escaped = str(value).replace('"', '\\"')
+            lines.append(f'{key} = "{escaped}"')
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nSaved your answers to {_friendly_path(path)}")
+
 
 def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) -> None:
     action = (subargs[0].lower() if subargs else "list")
@@ -897,7 +906,10 @@ def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) 
                 _console_print(console, f"ERROR: {message}")
             return
         if not path_obj:
-            _console_print(console, f"Profile '{slug}' does not exist yet. Run the wizard with --profile {slug} to create it.")
+            _console_print(
+                console,
+                f"Profile '{slug}' does not exist yet. Run the wizard with --profile {slug} to create it.",
+            )
             return
         _set_active_profile(slug)
         _console_print(console, f"Active profile set to '{slug}'.")
@@ -938,8 +950,6 @@ def _handle_profiles(subargs: list[str], explicit_profile: str | None, console) 
         _console_print(console, f"Renamed profile '{old_slug}' to '{new_slug}'.")
         return
     _console_print(console, "Unknown profiles command. Available: list, show, switch, delete, restore, rename.")
-
-
 
 
 def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console) -> None:
@@ -996,6 +1006,8 @@ def _print_summary(payload: T4EstimateRequest, outcome: dict[str, Any], console)
         if status:
             line += f" - status: {status}"
         _console_print(console, line)
+
+
 def _run_wizard(
     data_path: str | None,
     *,
@@ -1041,7 +1053,9 @@ def _run_wizard(
         if reviewed is not None:
             answers = reviewed
             break
-    payload_data = {key: value for key, value in answers.items() if key in CLI_SUBMIT_FIELDS and value is not None}
+    payload_data = {
+        key: value for key, value in answers.items() if key in CLI_SUBMIT_FIELDS and value is not None
+    }
     try:
         payload = T4EstimateRequest.model_validate(payload_data)
     except ValidationError as exc:
@@ -1114,7 +1128,10 @@ def main(argv: list[str] | None = None) -> None:
     profile_slug = _slugify(args.profile) if args.profile else _get_active_profile()
     profile_data, _, profile_errors = _load_profile(profile_slug)
     if profile_slug and not profile_data and not profile_errors:
-        _console_print(console, f"Profile '{profile_slug}' does not exist yet; it will be created when you save.")
+        _console_print(
+            console,
+            f"Profile '{profile_slug}' does not exist yet; it will be created when you save.",
+        )
     _run_wizard(
         args.data,
         allow_save=not args.no_save,
@@ -1126,7 +1143,5 @@ def main(argv: list[str] | None = None) -> None:
     )
 
 
-
 if __name__ == "__main__":
     main()
-
