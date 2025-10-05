@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Iterable
 
 from app.tax.prov.base import ProvincialAdapter
 from app.tax.prov.ab2025 import adapter as ab_2025
@@ -16,19 +16,24 @@ from app.tax.prov.pe2025 import adapter as pe_2025
 from app.tax.prov.sk2025 import adapter as sk_2025
 from app.tax.prov.yt2025 import adapter as yt_2025
 
+# Filing-season constants
+DEFAULT_TAX_YEAR = 2025
+NEXT_TAX_YEAR = 2026
+_YEAR = str(DEFAULT_TAX_YEAR)
+
+# (year, province_code) -> adapter
 _REGISTRY: Dict[Tuple[str, str], ProvincialAdapter] = {}
 
 
 def register_provincial_adapters(year: int | str, adapters: Iterable[ProvincialAdapter]) -> None:
     year_key = str(year)
     for adapter in adapters:
-        key = (year_key, adapter.code)
-        _REGISTRY[key] = adapter
+        _REGISTRY[(year_key, adapter.code)] = adapter
 
 
 # 2025 production adapters (default year)
 register_provincial_adapters(
-    2025,
+    DEFAULT_TAX_YEAR,
     (
         on_2025,
         bc_2025,
@@ -44,10 +49,6 @@ register_provincial_adapters(
         nu_2025,
     ),
 )
-
-
-# Placeholder for next filing season; populate once 2026 adapters land.
-NEXT_TAX_YEAR = 2026
 
 
 class UnknownProvinceError(KeyError):
@@ -67,13 +68,12 @@ def list_provincial_adapters(year: int | str | None = None) -> List[ProvincialAd
     seen: set[str] = set()
     adapters: List[ProvincialAdapter] = []
     for (registered_year, code), adapter in _REGISTRY.items():
-        if registered_year != target_year:
-            continue
-        if code in seen:
+        if registered_year != target_year or code in seen:
             continue
         adapters.append(adapter)
         seen.add(code)
     return adapters
+
 
 def list_supported_provinces(year: int | str | None = None) -> list[str]:
     # reuse the adapters list to keep de-dupe logic consistent
