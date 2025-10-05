@@ -1,3 +1,5 @@
+# app/main.py (drop-in replacement)
+
 import argparse
 import os
 import re
@@ -49,6 +51,7 @@ from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
 from app.tax.dispatch import (
     list_provincial_adapters,
+    DEFAULT_TAX_YEAR,  # <-- needed by defaults/help and adapter list
 )
 
 
@@ -499,8 +502,8 @@ _FIELD_METADATA: dict[str, dict[str, Any]] = {
     },
 }
 
-# Province choices (2025)
-_PROVINCE_ADAPTERS = tuple(list_provincial_adapters(2025))
+# Province choices (use the configured default year)
+_PROVINCE_ADAPTERS = tuple(list_provincial_adapters(DEFAULT_TAX_YEAR))
 _PROVINCE_CHOICES: tuple[tuple[str, str], ...] = tuple(
     (a.code, a.name) for a in _PROVINCE_ADAPTERS
 )
@@ -682,7 +685,7 @@ def _load_inputs(
 
 
 def _prompt_for_missing_fields(
-    data: dict[str, Any], *, quick: bool = False, console=None
+    data: dict[str, Any], *, quick: bool = False, console=None, non_interactive: bool = False
 ) -> dict[str, Any]:
     working = {key: _coerce_for_field(key, value) for key, value in data.items()}
     steps = [meta for meta in _WIZARD_SEQUENCE if meta["field"] in _FIELD_METADATA]
@@ -736,7 +739,7 @@ def _prompt_for_missing_fields(
 
 
 def _review_answers(
-    starting: dict[str, Any], answers: dict[str, Any], console
+    starting: dict[str, Any], answers: dict[str, Any], console, *, non_interactive: bool = False
 ) -> tuple[dict[str, Any] | None, bool]:
     """Return (final_answers, restart_requested)."""
     if non_interactive:
@@ -1218,3 +1221,4 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+
