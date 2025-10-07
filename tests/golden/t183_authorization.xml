@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <T183Authorization xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t183/1.0">
   <TaxpayerSINMasked>***-***-4286</TaxpayerSINMasked>
-  <SignedAt>2025-02-15T09:00:00</SignedAt>
-  <ExpiresAt>2025-02-15T09:00:00</ExpiresAt>
-  <SignatureIPAddress>hash-ip</SignatureIPAddress>
+  <TaxpayerName>
+    <FirstName>Test</FirstName>
+    <LastName>User</LastName>
+  </TaxpayerName>
+  <TaxpayerDOB>1990-01-01</TaxpayerDOB>
+  <Signature>
+    <SignedAt>2025-02-15T09:00:00</SignedAt>
+    <ExpiresAt>2025-05-16T09:00:00</ExpiresAt>
+    <IPAddress>hash-ip</IPAddress>
+    <UserAgentHash>hash-ua</UserAgentHash>
+  </Signature>
+  <Consent>
+    <DocumentPath>/tmp/t183.pdf</DocumentPath>
+  </Consent>
 </T183Authorization>
