@@ -413,14 +413,15 @@ def _compute_return(req: ReturnInput):
 
 
 def _resolve_artifact_root(request: Request) -> Path:
-    root_value = getattr(request.app.state, "artifact_root", None)
-    if root_value is None:
+    # Ensure we only pass a valid str/PathLike to Path(), never Any|None.
+    raw = getattr(request.app.state, "artifact_root", None)
+    if raw is None:
         settings = getattr(request.app.state, "settings", None)
-        if settings is not None:
-            root_value = getattr(settings, "artifact_root", "artifacts")
-        else:
-            root_value = "artifacts"
-    root_path = Path(root_value)
+        raw = getattr(settings, "artifact_root", None) if settings is not None else None
+    if isinstance(raw, (str, Path)):
+        root_path = Path(raw)
+    else:
+        root_path = Path("artifacts")
     if not root_path.is_absolute():
         root_path = (BASE_DIR / root_path).resolve()
     return root_path
@@ -530,7 +531,7 @@ def edit_profile(request: Request, slug: str) -> HTMLResponse:
     messages = _profile_messages(request)
     if load_errors:
         messages.extend(load_errors)
-    context = _profile_context(normalized, data, errors)
+    context: dict[str, Any] = _profile_context(normalized, data, errors)
     context.update(
         {
             "request": request,
