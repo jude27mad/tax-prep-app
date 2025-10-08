@@ -108,3 +108,55 @@ def test_preview_reports_field_errors(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "Could not understand number" in response.text
+
+
+def test_new_return_form_renders(monkeypatch, tmp_path):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    client = _build_client()
+
+    response = client.get("/ui/returns/new")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "Return input" in body
+    assert "name=\"taxpayer_sin\"" in body
+    assert "Compute return" in body
+
+
+def test_prepare_return_handles_valid_form(monkeypatch, tmp_path):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    _stub_form(
+        monkeypatch,
+        {
+            "taxpayer_sin": "046454286",
+            "taxpayer_first_name": "Test",
+            "taxpayer_last_name": "User",
+            "taxpayer_dob": "1990-01-01",
+            "taxpayer_address_line1": "1 Main St",
+            "taxpayer_city": "Toronto",
+            "taxpayer_province": "ON",
+            "taxpayer_postal_code": "M1M1M1",
+            "taxpayer_residency_status": "resident",
+            "household_marital_status": "single",
+            "household_spouse_sin": "",
+            "household_dependants_raw": "",
+            "slips_t4-0-employment_income": "60000",
+            "slips_t4-0-tax_deducted": "9000",
+            "rrsp_contrib": "0",
+            "province": "ON",
+            "tax_year": "2025",
+            "t183_signed_ts": "2025-02-15T09:00",
+            "t183_ip_hash": "hash-ip",
+            "t183_user_agent_hash": "hash-ua",
+            "t183_pdf_path": "/tmp/t183.pdf",
+            "out_path": "artifacts/printouts/t1.pdf",
+        },
+    )
+
+    client = _build_client()
+    response = client.post("/ui/returns/prepare")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "Return validated" in body or "Return validated." in body
+    assert "Submitted payload" in body

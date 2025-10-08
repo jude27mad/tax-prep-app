@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile  # for type-narrowing form inputs
 
+from app.core.models import ReturnInput
+from app.core.validate.pre_submit import validate_return_input
 from app.wizard import (
     BASE_DIR,
     CLI_BOOL_FIELDS,
@@ -205,6 +208,231 @@ def _profile_context(slug: str, data: dict[str, Any], errors: dict[str, str] | N
     }
 
 
+def _blank_slip_state(index: int = 0) -> dict[str, Any]:
+    return {
+        "index": index,
+        "employment_income": "",
+        "tax_deducted": "",
+        "cpp_contrib": "",
+        "ei_premiums": "",
+        "pensionable_earnings": "",
+        "insurable_earnings": "",
+    }
+
+
+def _default_return_form_state() -> dict[str, Any]:
+    return {
+        "taxpayer": {
+            "sin": "",
+            "first_name": "",
+            "last_name": "",
+            "dob": "",
+            "address_line1": "",
+            "city": "",
+            "province": "ON",
+            "postal_code": "",
+            "residency_status": "resident",
+        },
+        "household": {
+            "marital_status": "single",
+            "spouse_sin": "",
+            "dependants_raw": "",
+        },
+        "slips_t4": [_blank_slip_state()],
+        "rrsp_contrib": "0.00",
+        "province": "ON",
+        "tax_year": "2025",
+        "t183": {
+            "signed_ts": "",
+            "ip_hash": "",
+            "user_agent_hash": "",
+            "pdf_path": "",
+        },
+        "outputs": {
+            "out_path": "artifacts/printouts/t1.pdf",
+        },
+        "efile": {
+            "endpoint": "",
+            "software_id": "",
+            "software_ver": "",
+            "transmitter_id": "",
+        },
+    }
+
+
+def _normalize_datetime_field(value: str) -> str | None:
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError:
+        return cleaned
+    if parsed.tzinfo:
+        return parsed.isoformat()
+    return parsed.replace(microsecond=0).isoformat()
+
+
+def _dependants_from_text(raw: str) -> list[str]:
+    entries: list[str] = []
+    for segment in raw.replace(",", "\n").splitlines():
+        item = segment.strip()
+        if item:
+            entries.append(item)
+    return entries
+
+
+def _resolve_field_name(location: tuple[Any, ...]) -> str:
+    if not location:
+        return "return"
+    first = location[0]
+    rest = location[1:]
+    if first == "taxpayer":
+        return "taxpayer_" + "_".join(str(part) for part in rest)
+    if first == "household":
+        if rest and rest[0] == "dependants":
+            return "household_dependants_raw"
+        return "household_" + "_".join(str(part) for part in rest)
+    if first == "slips_t4" and len(location) >= 3 and isinstance(location[1], int):
+        return f"slips_t4-{location[1]}-{location[2]}"
+    return "_".join(str(part) for part in location)
+
+
+def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[str, str], dict[str, Any]]:
+    state = _default_return_form_state()
+    taxpayer_state = state["taxpayer"]
+    household_state = state["household"]
+    for field in list(taxpayer_state.keys()):
+        if field == "province":
+            taxpayer_state[field] = _form_text(form.get(f"taxpayer_{field}")) or taxpayer_state[field]
+        else:
+            taxpayer_state[field] = _form_text(form.get(f"taxpayer_{field}"))
+    household_state["marital_status"] = _form_text(form.get("household_marital_status")) or household_state["marital_status"]
+    household_state["spouse_sin"] = _form_text(form.get("household_spouse_sin"))
+    household_state["dependants_raw"] = _form_text(form.get("household_dependants_raw"))
+
+    state["province"] = _form_text(form.get("province")) or state["province"]
+    state["tax_year"] = _form_text(form.get("tax_year")) or state["tax_year"]
+    state["rrsp_contrib"] = _form_text(form.get("rrsp_contrib")) or state["rrsp_contrib"]
+
+    t183_state = state["t183"]
+    t183_state["signed_ts"] = _form_text(form.get("t183_signed_ts"))
+    t183_state["ip_hash"] = _form_text(form.get("t183_ip_hash"))
+    t183_state["user_agent_hash"] = _form_text(form.get("t183_user_agent_hash"))
+    t183_state["pdf_path"] = _form_text(form.get("t183_pdf_path"))
+
+    outputs_state = state["outputs"]
+    outputs_state["out_path"] = _form_text(form.get("out_path")) or outputs_state["out_path"]
+
+    efile_state = state["efile"]
+    efile_state["endpoint"] = _form_text(form.get("endpoint"))
+    efile_state["software_id"] = _form_text(form.get("software_id"))
+    efile_state["software_ver"] = _form_text(form.get("software_ver"))
+    efile_state["transmitter_id"] = _form_text(form.get("transmitter_id"))
+
+    slip_indices: set[int] = set()
+    for key in form.keys():
+        if not key.startswith("slips_t4-"):
+            continue
+        _, maybe_index, *_ = key.split("-", 2)
+        if maybe_index.isdigit():
+            slip_indices.add(int(maybe_index))
+    state["slips_t4"] = []
+    for index in sorted(slip_indices) or [0]:
+        slip_state = _blank_slip_state(index)
+        for field in [
+            "employment_income",
+            "tax_deducted",
+            "cpp_contrib",
+            "ei_premiums",
+            "pensionable_earnings",
+            "insurable_earnings",
+        ]:
+            key = f"slips_t4-{index}-{field}"
+            slip_state[field] = _form_text(form.get(key))
+        state["slips_t4"].append(slip_state)
+
+    taxpayer_payload = taxpayer_state.copy()
+    if not taxpayer_payload.get("province"):
+        taxpayer_payload["province"] = state["province"]
+    if not taxpayer_payload.get("residency_status"):
+        taxpayer_payload["residency_status"] = "resident"
+
+    household_payload = {
+        "marital_status": household_state["marital_status"] or "single",
+        "spouse_sin": household_state["spouse_sin"] or None,
+        "dependants": _dependants_from_text(household_state["dependants_raw"]),
+    }
+
+    slips_payload: list[dict[str, Any]] = []
+    for slip_state in state["slips_t4"]:
+        slip_payload: dict[str, Any] = {}
+        for field in [
+            "employment_income",
+            "tax_deducted",
+            "cpp_contrib",
+            "ei_premiums",
+            "pensionable_earnings",
+            "insurable_earnings",
+        ]:
+            value = slip_state.get(field, "").strip()
+            if value:
+                slip_payload[field] = value
+        if slip_payload:
+            slips_payload.append(slip_payload)
+
+    payload = {
+        "taxpayer": taxpayer_payload,
+        "household": household_payload,
+        "slips_t4": slips_payload,
+        "rrsp_contrib": state["rrsp_contrib"],
+        "province": state["province"],
+        "tax_year": state["tax_year"],
+        "t183_signed_ts": _normalize_datetime_field(t183_state["signed_ts"]) or None,
+        "t183_ip_hash": t183_state["ip_hash"] or None,
+        "t183_user_agent_hash": t183_state["user_agent_hash"] or None,
+        "t183_pdf_path": t183_state["pdf_path"] or None,
+    }
+
+    field_errors: dict[str, str] = {}
+    try:
+        request_model = ReturnInput.model_validate(payload)
+    except ValidationError as exc:
+        for error in exc.errors():
+            loc = tuple(error.get("loc", ()))
+            field_errors[_resolve_field_name(loc)] = error.get("msg", "Invalid value")
+        return None, field_errors, state
+
+    return request_model, field_errors, state
+
+
+def _compute_return(req: ReturnInput):
+    from app.api import http as api_http
+
+    return api_http._compute_for_year(req)
+
+
+def _resolve_artifact_root(request: Request) -> Path:
+    root_value = getattr(request.app.state, "artifact_root", None)
+    if root_value is None:
+        settings = getattr(request.app.state, "settings", None)
+        if settings is not None:
+            root_value = getattr(settings, "artifact_root", "artifacts")
+        else:
+            root_value = "artifacts"
+    root_path = Path(root_value)
+    if not root_path.is_absolute():
+        root_path = (BASE_DIR / root_path).resolve()
+    return root_path
+
+
+def _relative_artifact_label(path: Path) -> str:
+    try:
+        return str(path.relative_to(BASE_DIR))
+    except ValueError:
+        return str(path)
+
+
 @router.get("/", response_class=HTMLResponse)
 def profiles_home(request: Request) -> HTMLResponse:
     profiles = list_profiles()
@@ -343,3 +571,100 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
         pe = cast(list[str], context.setdefault("preview_errors", []))
         pe.extend(list(errors.values()))
     return TEMPLATES.TemplateResponse("preview.html", context)
+
+
+@router.get("/returns/new", response_class=HTMLResponse)
+def new_return(request: Request) -> HTMLResponse:
+    context = {
+        "request": request,
+        "form_state": _default_return_form_state(),
+        "field_errors": {},
+        "issues": [],
+        "calc": None,
+        "calc_json": None,
+        "payload_json": None,
+        "prepare_ok": False,
+        "artifact_paths": [],
+        "format_currency": _format_currency,
+        "messages": [],
+    }
+    return TEMPLATES.TemplateResponse("return_form.html", context)
+
+
+@router.post("/returns/prepare", response_class=HTMLResponse)
+async def prepare_return(request: Request) -> HTMLResponse:
+    form = await request.form()
+    form_dict = {key: form.get(key) for key in form.keys()}
+    payload, field_errors, state = _parse_return_form(form_dict)
+
+    issues: list[str] = []
+    calc_dump: dict[str, Any] | None = None
+    calc_json: str | None = None
+    payload_json: str | None = None
+    status_code = 200
+
+    if payload is None:
+        status_code = 400
+    else:
+        payload_json = json.dumps(payload.model_dump(mode="json"), indent=2)
+        issues = validate_return_input(payload)
+        if not issues:
+            calc = _compute_return(payload)
+            calc_dump = calc.model_dump(mode="json")
+            calc_json = json.dumps(calc_dump, indent=2)
+
+    context = {
+        "request": request,
+        "form_state": state,
+        "field_errors": field_errors,
+        "issues": issues,
+        "calc": calc_dump,
+        "calc_json": calc_json,
+        "payload_json": payload_json,
+        "prepare_ok": payload is not None and not issues,
+        "artifact_paths": [],
+        "format_currency": _format_currency,
+    }
+    messages: list[str] = []
+    if payload is None:
+        messages.append("Please review the highlighted fields before continuing.")
+    context["messages"] = messages
+    return TEMPLATES.TemplateResponse("return_form.html", context, status_code=status_code)
+
+
+@router.get("/artifacts/list", response_class=JSONResponse)
+def list_artifacts(request: Request, digest: str) -> JSONResponse:
+    root = _resolve_artifact_root(request)
+    paths: list[dict[str, str]] = []
+    if root.exists():
+        for path in sorted(root.rglob(f"*{digest}*.xml")):
+            if not path.is_file():
+                continue
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                relative = path
+            paths.append({
+                "path": str(relative),
+                "label": _relative_artifact_label(path),
+            })
+    return JSONResponse({"paths": paths})
+
+
+@router.get("/artifacts/download")
+def download_artifact(request: Request, path: str) -> FileResponse:
+    if not path:
+        raise HTTPException(status_code=400, detail="Missing artifact path")
+    root = _resolve_artifact_root(request)
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = (root / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Artifact not found") from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(candidate)
