@@ -10,9 +10,32 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element name="TaxpayerSINMasked" type="xs:string"/>
-        <xs:element name="SignedAt" type="xs:dateTime"/>
-        <xs:element name="ExpiresAt" type="xs:dateTime"/>
-        <xs:element name="SignatureIPAddress" type="xs:string" minOccurs="0"/>
+        <xs:element name="TaxpayerName">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="FirstName" type="xs:string"/>
+              <xs:element name="LastName" type="xs:string"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="TaxpayerDOB" type="xs:date"/>
+        <xs:element name="Signature">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="SignedAt" type="xs:dateTime"/>
+              <xs:element name="ExpiresAt" type="xs:dateTime"/>
+              <xs:element name="IPAddress" type="xs:string" minOccurs="0"/>
+              <xs:element name="UserAgentHash" type="xs:string" minOccurs="0"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="Consent" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="DocumentPath" type="xs:string" minOccurs="0"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
       </xs:sequence>
     </xs:complexType>
   </xs:element>

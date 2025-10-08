@@ -1,7 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <T1Return xmlns="http://www.cra-arc.gc.ca/xmlns/efile/t1/1.0">
   <TaxYear>2025</TaxYear>
-  <TaxpayerSIN>046454286</TaxpayerSIN>
-  <Province>ON</Province>
-  <NetIncome>60000.00</NetIncome>
+  <Taxpayer>
+    <SIN>046454286</SIN>
+    <FirstName>Test</FirstName>
+    <LastName>User</LastName>
+    <DateOfBirth>1990-01-01</DateOfBirth>
+    <Address>
+      <Line1>1 Main St</Line1>
+      <City>Toronto</City>
+      <Province>ON</Province>
+      <PostalCode>M1M1M1</PostalCode>
+    </Address>
+    <ResidencyStatus>resident</ResidencyStatus>
+  </Taxpayer>
+  <Household>
+    <MaritalStatus>single</MaritalStatus>
+  </Household>
+  <LineItems>
+    <IncomeTotal>60000.00</IncomeTotal>
+    <TaxableIncome>60000.00</TaxableIncome>
+    <FederalTax>8857.50</FederalTax>
+    <ProvincialTax>3321.67</ProvincialTax>
+  </LineItems>
+  <Totals>
+    <NetTax>12496.74</NetTax>
+  </Totals>
 </T1Return>

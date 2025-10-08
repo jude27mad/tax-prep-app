@@ -10,9 +10,59 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element name="TaxYear" type="xs:gYear"/>
-        <xs:element name="TaxpayerSIN" type="xs:string"/>
-        <xs:element name="Province" type="xs:string" minOccurs="0"/>
-        <xs:element name="NetIncome" type="xs:decimal" minOccurs="0"/>
+        <xs:element name="Taxpayer">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="SIN" type="xs:string"/>
+              <xs:element name="FirstName" type="xs:string"/>
+              <xs:element name="LastName" type="xs:string"/>
+              <xs:element name="DateOfBirth" type="xs:date"/>
+              <xs:element name="Address">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="Line1" type="xs:string"/>
+                    <xs:element name="City" type="xs:string"/>
+                    <xs:element name="Province" type="xs:string"/>
+                    <xs:element name="PostalCode" type="xs:string"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="ResidencyStatus" type="xs:string"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="Household" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="MaritalStatus" type="xs:string"/>
+              <xs:element name="SpouseSIN" type="xs:string" minOccurs="0"/>
+              <xs:element name="Dependants" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="DependantsCount" type="xs:nonNegativeInteger"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="LineItems">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="IncomeTotal" type="xs:decimal"/>
+              <xs:element name="TaxableIncome" type="xs:decimal"/>
+              <xs:element name="FederalTax" type="xs:decimal"/>
+              <xs:element name="ProvincialTax" type="xs:decimal"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="Totals">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="NetTax" type="xs:decimal"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
       </xs:sequence>
     </xs:complexType>
   </xs:element>
