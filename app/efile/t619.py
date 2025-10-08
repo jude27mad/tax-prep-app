@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Any, Dict
@@ -13,7 +13,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 import xmlschema
 
 from app.core.models import ReturnCalc, ReturnInput
-from app.efile.t183 import mask_sin
+from app.efile.t183 import _compute_expiry, mask_sin
 
 NS_T1 = "http://www.cra-arc.gc.ca/xmlns/efile/t1/1.0"
 NS_T183 = "http://www.cra-arc.gc.ca/xmlns/efile/t183/1.0"
@@ -153,7 +153,7 @@ def map_t183_fields(req: ReturnInput) -> dict[str, Any]:
     if not req.t183_signed_ts:
         raise ValueError("T183 signature timestamp is required for CRA payload")
     signed_at: datetime = req.t183_signed_ts
-    expires_at = signed_at + timedelta(days=90)
+    expires_at = _compute_expiry(signed_at)
     data: dict[str, Any] = {
         "TaxpayerSINMasked": mask_sin(req.taxpayer.sin),
         "TaxpayerName": {
