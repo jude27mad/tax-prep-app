@@ -548,7 +548,7 @@ async def save_profile(request: Request, slug: str):
     form_dict = {key: form.get(key) for key in form.keys()}
     data, field_errors = _extract_form_data(form_dict)
     if field_errors:
-        context = _profile_context(normalized, data, field_errors)
+        context: dict[str, Any] = _profile_context(normalized, data, field_errors)
         context.update({"request": request, "messages": ["Please fix the highlighted fields."]})
         return TEMPLATES.TemplateResponse("edit.html", context, status_code=400)
     save_profile_data(normalized, data)
@@ -576,7 +576,7 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
 
 @router.get("/returns/new", response_class=HTMLResponse)
 def new_return(request: Request) -> HTMLResponse:
-    context = {
+    context: dict[str, Any] = {
         "request": request,
         "form_state": _default_return_form_state(),
         "field_errors": {},
@@ -614,7 +614,7 @@ async def prepare_return(request: Request) -> HTMLResponse:
             calc_dump = calc.model_dump(mode="json")
             calc_json = json.dumps(calc_dump, indent=2)
 
-    context = {
+    context: dict[str, Any] = {
         "request": request,
         "form_state": state,
         "field_errors": field_errors,
@@ -669,3 +669,4 @@ def download_artifact(request: Request, path: str) -> FileResponse:
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(candidate)
+
