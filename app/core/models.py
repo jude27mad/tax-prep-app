@@ -1,6 +1,15 @@
 from decimal import Decimal
-from pydantic import BaseModel, Field
 from datetime import date, datetime
+from pydantic import BaseModel, Field, field_validator
+
+
+_CENT = Decimal("0.01")
+
+
+def _quantize_decimal(value: Decimal | None) -> Decimal | None:
+  if value is None:
+    return None
+  return value.quantize(_CENT)
 
 class Taxpayer(BaseModel):
   sin: str
@@ -26,10 +35,89 @@ class T4Slip(BaseModel):
   insurable_earnings: Decimal | None = None
   tax_deducted: Decimal | None = None
 
+  _quantize_employment_income = field_validator(
+    "employment_income",
+    mode="after",
+  )(_quantize_decimal)
+  _quantize_optional_fields = field_validator(
+    "cpp_contrib",
+    "ei_premiums",
+    "pensionable_earnings",
+    "insurable_earnings",
+    "tax_deducted",
+    mode="after",
+  )(_quantize_decimal)
+
+
+class T4ASlip(BaseModel):
+  pension_income: Decimal | None = None
+  self_employment_commissions: Decimal | None = None
+  other_income: Decimal | None = None
+  tax_deducted: Decimal | None = None
+
+  _quantize_optional_fields = field_validator(
+    "pension_income",
+    "self_employment_commissions",
+    "other_income",
+    "tax_deducted",
+    mode="after",
+  )(_quantize_decimal)
+
+
+class T5Slip(BaseModel):
+  interest_income: Decimal | None = None
+  eligible_dividends: Decimal | None = None
+  other_dividends: Decimal | None = None
+  foreign_income: Decimal | None = None
+  foreign_tax_paid: Decimal | None = None
+  tax_deducted: Decimal | None = None
+
+  _quantize_optional_fields = field_validator(
+    "interest_income",
+    "eligible_dividends",
+    "other_dividends",
+    "foreign_income",
+    "foreign_tax_paid",
+    "tax_deducted",
+    mode="after",
+  )(_quantize_decimal)
+
+
+class RRSPReceipt(BaseModel):
+  contribution_amount: Decimal
+  issuer: str | None = None
+  receipt_type: str | None = None
+  period_start: date | None = None
+  period_end: date | None = None
+
+  _quantize_amount = field_validator(
+    "contribution_amount",
+    mode="after",
+  )(_quantize_decimal)
+
+
+class DeductionCreditInputs(BaseModel):
+  tuition_fees: Decimal | None = None
+  medical_expenses: Decimal | None = None
+  charitable_donations: Decimal | None = None
+  student_loan_interest: Decimal | None = None
+
+  _quantize_optional_fields = field_validator(
+    "tuition_fees",
+    "medical_expenses",
+    "charitable_donations",
+    "student_loan_interest",
+    mode="after",
+  )(_quantize_decimal)
+
 class ReturnInput(BaseModel):
   taxpayer: Taxpayer
   household: Household | None = None
   slips_t4: list[T4Slip] = Field(default_factory=list)
+  slips_t4a: list[T4ASlip] = Field(default_factory=list)
+  slips_t5: list[T5Slip] = Field(default_factory=list)
+  rrsp_receipts: list[RRSPReceipt] = Field(default_factory=list)
+  deductions: DeductionCreditInputs = Field(default_factory=DeductionCreditInputs)
   rrsp_contrib: Decimal = Decimal("0.00")
   t183_signed_ts: datetime | None = None
   t183_ip_hash: str | None = None
