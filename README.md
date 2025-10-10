@@ -102,6 +102,25 @@ Docs: <http://127.0.0.1:8001/docs>
 
 Stop any server with `Ctrl+C`.
 
+### API schema updates (2025 enhancements)
+
+- **Request slip summaries**: `/prepare` and `/prepare/efile` now accept optional
+  `slips_t4_count`, `slips_t4a_count`, and `slips_t5_count` fields when sending
+  JSON payloads. When provided, the counts are validated against the attached
+  slips and CRA's 50-slip per-type maximum to surface mismatches before filing.
+- **RRSP aggregation**: RRSP contributions can be supplied as a direct
+  `rrsp_contrib` amount and/or a list of `rrsp_receipts` with individual
+  contribution records. The calculator consolidates both sources before applying
+  deductions, and validation now enforces non-negative amounts on every receipt.
+- **Expanded provincial inputs**: `ReturnInput.province` accepts the 2025 codes
+  registered in the dispatch layer (`ON`, `BC`, `AB`, `MB`, `SK`, `NS`, `NB`,
+  `NL`, `PE`, `YT`, `NT`, `NU`). Ontario remains the default when omitted, but
+  providing the code ensures the correct calculator and additions are applied.
+- **Response line items**: The `calc.line_items` payload returned from
+  `/prepare` and `/prepare/efile` now reflects combined T4/T4A/T5 incomes and
+  RRSP deductions, and includes province-specific addition keys (e.g.
+  `ontario_surtax`, `ontario_health_premium`) when the calculator reports them.
+
 ## Environment configuration
 
 Key environment variables (defaults shown):

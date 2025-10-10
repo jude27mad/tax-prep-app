@@ -2,12 +2,19 @@ from decimal import Decimal
 
 from app.core.models import T4ASlip, T5Slip, TuitionSlip
 from app.core.validate.pre_submit import validate_return_input, validate_before_efile, Identity
-from tests.fixtures.min_client import make_min_input
+from tests.fixtures.min_client import make_min_input, make_provincial_examples
 
 
 def test_validate_ok():
   issues = validate_return_input(make_min_input())
   assert issues == []
+
+
+def test_validate_accepts_provincial_examples():
+  examples = make_provincial_examples()
+  for req in examples.values():
+    issues = validate_return_input(req)
+    assert issues == []
 
 
 def test_validate_postal_and_year():
@@ -55,6 +62,57 @@ def test_validate_before_efile_bad_postal():
   assert "10006" in codes
   assert "30010" in codes
   assert "50010" in codes
+
+
+def test_validate_before_efile_detects_slip_count_mismatch():
+  req = make_min_input(include_examples=True, province="BC")
+  identity = Identity(
+    sin="046454286",
+    first_name="Test",
+    last_name="User",
+    dob_yyyy_mm_dd="1990-01-01",
+    address_line1="1 Main St",
+    city=req.taxpayer.city,
+    province=req.taxpayer.province,
+    postal_code=req.taxpayer.postal_code,
+  )
+  payload = {
+    "tax_year": req.tax_year,
+    "province": req.province,
+    "taxable_income": "90000",
+    "t183_signed_ts": req.t183_signed_ts,
+    "t183_ip_hash": req.t183_ip_hash,
+    "t183_user_agent_hash": req.t183_user_agent_hash,
+    "slips_t4": [
+      {
+        key: str(value)
+        for key, value in slip.model_dump().items()
+        if value is not None
+      }
+      for slip in req.slips_t4
+    ],
+    "slips_t4a": [
+      {
+        key: str(value)
+        for key, value in slip.model_dump().items()
+        if value is not None
+      }
+      for slip in req.slips_t4a
+    ],
+    "slips_t5": [
+      {
+        key: str(value)
+        for key, value in slip.model_dump().items()
+        if value is not None
+      }
+      for slip in req.slips_t5
+    ],
+  }
+  payload["slips_t4_count"] = len(req.slips_t4) + 1
+  payload["slips_t5_count"] = len(req.slips_t5)
+  issues = validate_before_efile(identity, payload)
+  codes = {issue.code for issue in issues}
+  assert "60012" in codes
 
 
 def test_validate_rejects_negative_t4_amount():
