@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Mapping
 
 from app.core.models import ReturnCalc, ReturnInput
-from app.core.slips import t4 as t4mod
-from app.core.tax_years.y2025.federal import federal_nrtcs_2025, federal_tax_2025
-from app.core.provinces.on import (
-    on_health_premium_2025,
-    on_credits_2025,
-    on_surtax_2025,
-    on_tax_on_taxable_income_2025,
+from app.core.slips import (
+    sum_rrsp_contributions,
+    sum_t4a_income,
+    sum_t5_income,
 )
+from app.core.slips import t4 as t4mod
+from app.core.provinces import get_provincial_calculator
+from app.core.tax_years.y2025.federal import federal_nrtcs_2025, federal_tax_2025
 
 D = Decimal
 
@@ -22,47 +23,61 @@ class TaxBreakdown2025:
     federal_credits: D
     provincial_tax: D
     provincial_credits: D
-    ontario_surtax: D
-    ontario_health_premium: D
+    provincial_additions: Mapping[str, D]
     total_payable: D
+
+    @property
+    def ontario_surtax(self) -> D:
+        return self.provincial_additions.get("ontario_surtax", D("0.00"))
+
+    @property
+    def ontario_health_premium(self) -> D:
+        return self.provincial_additions.get("ontario_health_premium", D("0.00"))
 
 
 def compute_full_2025(
     taxable_income: D,
     net_income: D,
     personal_credit_amounts: dict[str, D] | None = None,
+    province: str | None = None,
 ) -> TaxBreakdown2025:
     f_tax = federal_tax_2025(taxable_income)
     f_credits = federal_nrtcs_2025(net_income, personal_credit_amounts or {})
-    on_tax = on_tax_on_taxable_income_2025(taxable_income)
-    on_creds = on_credits_2025()
-    on_before_surtax = max(D("0"), on_tax - on_creds)
-    on_surtax = on_surtax_2025(on_before_surtax)
-    on_hp = on_health_premium_2025(taxable_income)
-    total = max(D("0"), f_tax - f_credits) + on_before_surtax + on_surtax + on_hp
+    calculator = get_provincial_calculator(2025, province)
+    prov_tax = calculator.tax(taxable_income)
+    prov_creds = calculator.credits()
+    additions = dict(calculator.additions(taxable_income, prov_tax, prov_creds))
+    prov_payable = max(D("0"), prov_tax - prov_creds)
+    additions_total = sum(additions.values(), D("0.00"))
+    total = max(D("0"), f_tax - f_credits) + prov_payable + additions_total
     return TaxBreakdown2025(
         federal_tax=f_tax,
         federal_credits=f_credits,
-        provincial_tax=on_tax,
-        provincial_credits=on_creds,
-        ontario_surtax=on_surtax,
-        ontario_health_premium=on_hp,
+        provincial_tax=prov_tax,
+        provincial_credits=prov_creds,
+        provincial_additions=additions,
         total_payable=total.quantize(D("0.01")),
     )
 
 
 def compute_return(in_: ReturnInput) -> ReturnCalc:
-    income = t4mod.sum_employment_income(in_.slips_t4)
-    taxable_income = income - in_.rrsp_contrib
-    breakdown = compute_full_2025(taxable_income, income)
+    employment_income = t4mod.sum_employment_income(in_.slips_t4)
+    t4a_income = sum_t4a_income(in_.slips_t4a)
+    t5_income = sum_t5_income(in_.slips_t5)
+    total_income = employment_income + t4a_income + t5_income
+    rrsp_deductions = in_.rrsp_contrib + sum_rrsp_contributions(in_.rrsp_receipts)
+    taxable_income = total_income - rrsp_deductions
+    breakdown = compute_full_2025(taxable_income, total_income, province=in_.province)
     cpp = t4mod.compute_cpp_2024(in_.slips_t4)
     ei = t4mod.compute_ei_2024(in_.slips_t4)
     line_items = {
-        "income_total": income,
+        "income_total": total_income,
         "taxable_income": taxable_income,
         "federal_tax": breakdown.federal_tax,
         "prov_tax": breakdown.provincial_tax,
     }
+    if breakdown.provincial_additions:
+        line_items.update(breakdown.provincial_additions)
     totals = {
         "net_tax": breakdown.total_payable,
     }
