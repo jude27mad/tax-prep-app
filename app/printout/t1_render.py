@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 import re
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
 from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen import canvas
+from reportlab import rl_config
 
 from app.config import get_settings
 from app.core.models import ReturnCalc, ReturnInput
@@ -267,20 +269,33 @@ def _draw_page_number(pdf: canvas.Canvas, total_pages: int) -> None:
     pdf.drawRightString(RIGHT_MARGIN, 36, page_text)
 
 
+@contextmanager
+def _pdf_invariant_mode():
+    """Temporarily enable ReportLab's invariant mode for deterministic output."""
+
+    previous = rl_config.invariant
+    rl_config.invariant = True
+    try:
+        yield
+    finally:
+        rl_config.invariant = previous
+
+
 def render_t1_pdf(out_path: str, request: ReturnInput, calc: ReturnCalc) -> str:
     """Render a CRA T1 printout and return the filesystem path."""
 
     output_path = _resolve_output_path(out_path, request, calc)
-    pdf = canvas.Canvas(str(output_path), pagesize=LETTER)
+    with _pdf_invariant_mode():
+        pdf = canvas.Canvas(str(output_path), pagesize=LETTER)
 
-    _set_metadata(pdf, request, calc)
-    _draw_headers(pdf, calc)
-    _draw_identity(pdf, request)
-    _draw_line_items(pdf, calc)
-    _draw_cpp_ei(pdf, calc)
-    _draw_rrsp(pdf, request)
-    _draw_page_number(pdf, 1)
+        _set_metadata(pdf, request, calc)
+        _draw_headers(pdf, calc)
+        _draw_identity(pdf, request)
+        _draw_line_items(pdf, calc)
+        _draw_cpp_ei(pdf, calc)
+        _draw_rrsp(pdf, request)
+        _draw_page_number(pdf, 1)
 
-    pdf.showPage()
-    pdf.save()
+        pdf.showPage()
+        pdf.save()
     return str(output_path)
