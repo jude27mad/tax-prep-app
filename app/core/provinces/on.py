@@ -67,6 +67,18 @@ def on_health_premium_2024(taxable_income: D) -> D:
     return premium.quantize(D("0.01"), rounding=ROUND_HALF_UP)
 
 
+def on_additions_2024(
+    taxable_income: D, provincial_tax: D, provincial_credits: D
+) -> dict[str, D]:
+    on_before_surtax = max(D("0"), provincial_tax - provincial_credits)
+    on_surtax = on_surtax_2024(on_before_surtax)
+    on_hp = on_health_premium_2024(taxable_income)
+    return {
+        "ontario_surtax": on_surtax,
+        "ontario_health_premium": on_hp,
+    }
+
+
 # ------------------------------ 2025 ---------------------------------
 ON_BRACKETS_2025 = [
     (D("0"),       D("52886"),  D("0.0505")),
@@ -112,3 +124,15 @@ def on_surtax_2025(ont_tax_before_surtax: D) -> D:
 def on_health_premium_2025(taxable_income: D) -> D:
     # Reuse 2024 schedule until CRA publishes ON428 2025 updates.
     return on_health_premium_2024(taxable_income)
+
+
+def on_additions_2025(
+    taxable_income: D, provincial_tax: D, provincial_credits: D
+) -> dict[str, D]:
+    on_before_surtax = max(D("0"), provincial_tax - provincial_credits)
+    on_surtax = on_surtax_2025(on_before_surtax)
+    on_hp = on_health_premium_2025(taxable_income)
+    return {
+        "ontario_surtax": on_surtax,
+        "ontario_health_premium": on_hp,
+    }
