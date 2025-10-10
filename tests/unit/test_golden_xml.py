@@ -16,7 +16,7 @@ def _schema_cache():
 
 
 def test_t619_matches_golden():
-    req = make_min_input()
+    req = make_min_input(include_examples=True)
     calc = compute_return(req)
     profile = {
         "Environment": "CERT",

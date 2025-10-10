@@ -18,12 +18,12 @@
     <MaritalStatus>single</MaritalStatus>
   </Household>
   <LineItems>
-    <IncomeTotal>60000.00</IncomeTotal>
-    <TaxableIncome>60000.00</TaxableIncome>
-    <FederalTax>8857.50</FederalTax>
-    <ProvincialTax>3321.67</ProvincialTax>
+    <IncomeTotal>81911.09</IncomeTotal>
+    <TaxableIncome>79761.09</TaxableIncome>
+    <FederalTax>12908.52</FederalTax>
+    <ProvincialTax>5129.81</ProvincialTax>
   </LineItems>
   <Totals>
-    <NetTax>12496.74</NetTax>
+    <NetTax>17596.17</NetTax>
   </Totals>
 </T1Return>
