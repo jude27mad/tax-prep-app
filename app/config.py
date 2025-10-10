@@ -35,7 +35,9 @@ class EfileProfile:
 
 class Settings(BaseModel):
     feature_efile_xml: bool = Field(default_factory=lambda: _env_bool("FEATURE_EFILE_XML", False))
-    feature_legacy_efile: bool = Field(default_factory=lambda: _env_bool("FEATURE_LEGACY_EFILE", True))
+    feature_legacy_efile: bool = Field(
+        default_factory=lambda: _env_bool("FEATURE_LEGACY_EFILE", False)
+    )
     efile_environment: Literal["CERT", "PROD"] = Field(default_factory=_env_env)
     software_id_cert: str = Field(default_factory=lambda: os.getenv("EFILE_SOFTWARE_ID_CERT", "TAXAPP-CERT"))
     software_id_prod: str = Field(default_factory=lambda: os.getenv("EFILE_SOFTWARE_ID_PROD", "TAXAPP-PROD"))

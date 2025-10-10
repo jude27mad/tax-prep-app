@@ -14,6 +14,7 @@ def _configure_settings(tmp_path) -> Settings:
     summaries = tmp_path / "summaries"
     settings = Settings(
         feature_efile_xml=True,
+        feature_legacy_efile=True,
         artifact_root=str(artifacts),
         daily_summary_root=str(summaries),
         endpoint_cert="http://127.0.0.1:9000",

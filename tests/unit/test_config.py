@@ -11,9 +11,11 @@ def test_profile_defaults():
 
 def test_feature_flag_parsing(monkeypatch):
     monkeypatch.setenv("FEATURE_EFILE_XML", "true")
+    monkeypatch.setenv("FEATURE_LEGACY_EFILE", "true")
     monkeypatch.setenv("EFILE_ENV", "prod")
     get_settings.cache_clear()
     settings = Settings()
     assert settings.feature_efile_xml is True
+    assert settings.feature_legacy_efile is True
     assert settings.efile_environment == "PROD"
     get_settings.cache_clear()

@@ -4,8 +4,6 @@ from importlib import import_module
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.datastructures import FormData
-
 import app.wizard as wizard
 import app.wizard.profiles as profiles
 
@@ -29,17 +27,6 @@ def _configure_profiles_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(ui_router_module, "BASE_DIR", base)
     monkeypatch.setattr(wizard, "BASE_DIR", base)
 
-    # FastAPI's form parser requires python-multipart. Provide a simple stub so the
-    # router can consume form data in tests without the extra dependency.
-    from starlette import requests as starlette_requests
-
-    if getattr(starlette_requests, "parse_options_header", None) is None:
-        monkeypatch.setattr(
-            starlette_requests,
-            "parse_options_header",
-            lambda value: ("application/x-www-form-urlencoded", {}),
-        )
-
     return base
 
 
@@ -47,13 +34,6 @@ def _build_client():
     app = FastAPI()
     app.include_router(ui_router_module.router)
     return TestClient(app)
-
-
-def _stub_form(monkeypatch, data: dict[str, str]):
-    async def fake_form(self):
-        return FormData(list(data.items()))
-
-    monkeypatch.setattr(ui_router_module.Request, "form", fake_form)
 
 
 def test_profiles_home_lists_profiles(tmp_path, monkeypatch):
@@ -69,9 +49,11 @@ def test_profiles_home_lists_profiles(tmp_path, monkeypatch):
 
 def test_preview_displays_summary(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
-    _stub_form(
-        monkeypatch,
-        {
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles/tester/preview",
+        data={
             "box14": "50000",
             "box22": "7000",
             "box16": "2500",
@@ -80,12 +62,11 @@ def test_preview_displays_summary(tmp_path, monkeypatch):
             "rrsp": "1000",
             "province": "ON",
         },
+        files={"__dummy_file": ("notes.txt", b"notes", "text/plain")},
     )
 
-    client = _build_client()
-    response = client.post("/ui/profiles/tester/preview")
-
     assert response.status_code == 200
+    assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
     body = response.text
     assert "Balance" in body
     assert "Contribution limits" in body
@@ -93,20 +74,21 @@ def test_preview_displays_summary(tmp_path, monkeypatch):
 
 def test_preview_reports_field_errors(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
-    _stub_form(
-        monkeypatch,
-        {
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles/tester/preview",
+        data={
             "box14": "oops",
             "box22": "7000",
             "box16": "2500",
             "box18": "890",
         },
+        files={"__dummy_file": ("notes.txt", b"notes", "text/plain")},
     )
 
-    client = _build_client()
-    response = client.post("/ui/profiles/tester/preview")
-
     assert response.status_code == 200
+    assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
     assert "Could not understand number" in response.text
 
 
@@ -125,9 +107,11 @@ def test_new_return_form_renders(monkeypatch, tmp_path):
 
 def test_prepare_return_handles_valid_form(monkeypatch, tmp_path):
     _configure_profiles_dirs(monkeypatch, tmp_path)
-    _stub_form(
-        monkeypatch,
-        {
+
+    client = _build_client()
+    response = client.post(
+        "/ui/returns/prepare",
+        data={
             "taxpayer_sin": "046454286",
             "taxpayer_first_name": "Test",
             "taxpayer_last_name": "User",
@@ -148,15 +132,13 @@ def test_prepare_return_handles_valid_form(monkeypatch, tmp_path):
             "t183_signed_ts": "2025-02-15T09:00",
             "t183_ip_hash": "hash-ip",
             "t183_user_agent_hash": "hash-ua",
-            "t183_pdf_path": "/tmp/t183.pdf",
             "out_path": "artifacts/printouts/t1.pdf",
         },
+        files={"t183_pdf_path": ("t183.pdf", b"PDF", "application/pdf")},
     )
 
-    client = _build_client()
-    response = client.post("/ui/returns/prepare")
-
     assert response.status_code == 200
+    assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
     body = response.text
     assert "Return validated" in body or "Return validated." in body
     assert "Submitted payload" in body
