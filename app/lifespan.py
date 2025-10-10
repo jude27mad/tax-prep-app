@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncContextManager
-
 import httpx
 from fastapi import FastAPI
 
@@ -96,6 +96,11 @@ def build_application_lifespan(
     http_timeout: float = 15.0,
 ) -> Callable[[FastAPI], AsyncContextManager[None]]:
     base_logger = logging.getLogger("tax_app")
+
+    try:
+        importlib.import_module("multipart")
+    except ImportError as exc:  # pragma: no cover - covered by dedicated unit test
+        raise RuntimeError("Install python-multipart to enable form parsing") from exc
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
