@@ -128,6 +128,7 @@ Key environment variables (defaults shown):
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `FEATURE_EFILE_XML` | Enable XML transmission flow | `false` |
+| `FEATURE_LEGACY_EFILE` | Enable legacy EFILE flow | `false` |
 | `EFILE_ENV` | Environment selector (`CERT`/`PROD`) | `CERT` |
 | `EFILE_SOFTWARE_ID_CERT` / `EFILE_SOFTWARE_ID_PROD` | CRA Software IDs | `TAXAPP-CERT`, `TAXAPP-PROD` |
 | `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs | `900000`, `900001` |
@@ -140,6 +141,7 @@ Set variables in the terminal before launching the preparer API, for example:
 
 ```powershell
 set FEATURE_EFILE_XML=true
+set FEATURE_LEGACY_EFILE=true
 set EFILE_SOFTWARE_ID_CERT=YOUR_SOFTWARE_ID
 set EFILE_TRANSMITTER_ID_CERT=YOUR_TRANSMITTER_ID
 set EFILE_ENDPOINT_CERT=https://cra-cert-endpoint
