@@ -29,7 +29,11 @@ logger = logging.getLogger("tax_app")
 async def _announce_default_tax_year(_: FastAPI) -> None:
     settings = get_settings()
     logger.info(
-        "Tax App startup complete; default_tax_year=%s env=%s", DEFAULT_TAX_YEAR, settings.efile_environment
+        "Tax App startup complete; default_tax_year=%s env=%s feature_efile_xml=%s feature_legacy_efile=%s",
+        DEFAULT_TAX_YEAR,
+        settings.efile_environment,
+        settings.feature_efile_xml,
+        settings.feature_legacy_efile,
     )
 
 
@@ -90,6 +94,7 @@ def health():
             "sha": settings.build_sha,
             "efile_env": settings.efile_environment,
             "feature_efile_xml": settings.feature_efile_xml,
+            "feature_legacy_efile": settings.feature_legacy_efile,
             "sbmt_ref_id_last": last_sbmt_ref_id,
         },
         "schemas": schema_versions,
@@ -172,6 +177,10 @@ async def legacy_efile(req: TransmitRequest):
     are expected to migrate to the XML pathway defined in ``app.efile.service``
     and ``app.efile.t619``.
     """
+    settings = getattr(app.state, "settings", get_settings())
+    if not settings.feature_legacy_efile:
+        raise HTTPException(status_code=410, detail="Legacy EFILE disabled")
+
     issues = validate_return_input(req)
     if issues:
         raise HTTPException(status_code=400, detail=issues)

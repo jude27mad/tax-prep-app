@@ -120,7 +120,11 @@ def build_application_lifespan(
         app.state.app_label = app_label
 
         logger.info(
-            "Startup complete: schemas=%s fonts_registered=%s", len(schema_cache), len(registered_fonts)
+            "Startup complete: schemas=%s fonts_registered=%s feature_efile_xml=%s feature_legacy_efile=%s",
+            len(schema_cache),
+            len(registered_fonts),
+            settings.feature_efile_xml,
+            settings.feature_legacy_efile,
         )
 
         try:

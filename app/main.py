@@ -123,6 +123,7 @@ def health():
             "version": settings.build_version,
             "sha": settings.build_sha,
             "feature_efile_xml": settings.feature_efile_xml,
+            "feature_legacy_efile": settings.feature_legacy_efile,
             "sbmt_ref_id_last": last_sbmt_ref_id,
         },
         "schemas": schema_versions,

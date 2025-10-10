@@ -36,6 +36,11 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+> **Note**
+> Form submissions in the FastAPI apps rely on `python-multipart`, which is
+> included in `requirements.txt`. Ensure your environment picks up the updated
+> dependency when reinstalling requirements.
+
 ## Guided wizard (no JSON typing)
 
 The estimator now includes a prompt-driven CLI so you can answer questions
@@ -128,6 +133,7 @@ Key environment variables (defaults shown):
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `FEATURE_EFILE_XML` | Enable XML transmission flow | `false` |
+| `FEATURE_LEGACY_EFILE` | Enable legacy EFILE flow | `false` |
 | `EFILE_ENV` | Environment selector (`CERT`/`PROD`) | `CERT` |
 | `EFILE_SOFTWARE_ID_CERT` / `EFILE_SOFTWARE_ID_PROD` | CRA Software IDs | `TAXAPP-CERT`, `TAXAPP-PROD` |
 | `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs | `900000`, `900001` |
@@ -140,10 +146,20 @@ Set variables in the terminal before launching the preparer API, for example:
 
 ```powershell
 set FEATURE_EFILE_XML=true
+set FEATURE_LEGACY_EFILE=true
 set EFILE_SOFTWARE_ID_CERT=YOUR_SOFTWARE_ID
 set EFILE_TRANSMITTER_ID_CERT=YOUR_TRANSMITTER_ID
 set EFILE_ENDPOINT_CERT=https://cra-cert-endpoint
 ```
+
+### Multipart form parsing
+
+The `/ui` routes rely on Starlette's multipart form parser, which now requires
+the `python-multipart` package at runtime. Refresh environments with `pip
+install -r requirements.txt` (or `pip install python-multipart`) before running
+the UI server and validate with `pip show python-multipart` or `python -c
+"import multipart"`. Additional rollout guidance lives in the [migration
+notes](docs/efile_suitability.md#migration).
 
 ## CRA tooling highlights
 
