@@ -26,3 +26,24 @@
    - Keep T183 e-sign logs for 6 years (per CRA retention rule)
    - Renew suitability annually before filing season opens
    - Track any CRA bulletins for rule changes, especially RC4018 updates
+
+## Migration
+
+### Python multipart parser requirement
+
+FastAPI's HTML form endpoints (used by the preparer UI) now depend on the
+[`python-multipart`](https://pypi.org/project/python-multipart/) package. Deploy
+targets created before this change should be updated to install the new
+dependency when refreshing virtual environments or container images.
+
+1. **Install the package** – run `pip install python-multipart` (or refresh from
+   `requirements.txt`) in every runtime that serves the UI routes.
+2. **Validate availability** – execute `python -c "import multipart; print(multipart.__version__)"`
+   or `pip show python-multipart` after deployment. Either command confirms the
+   interpreter can import the parser.
+3. **CI / build pipelines** – add the same validation step to Dockerfiles or CI
+   jobs so missing dependencies fail fast before going live.
+
+Without the package, POST requests that submit forms through `/ui/...` will
+return `500 Internal Server Error` responses because Starlette cannot parse the
+incoming multipart payload.

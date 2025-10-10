@@ -152,6 +152,15 @@ set EFILE_TRANSMITTER_ID_CERT=YOUR_TRANSMITTER_ID
 set EFILE_ENDPOINT_CERT=https://cra-cert-endpoint
 ```
 
+### Multipart form parsing
+
+The `/ui` routes rely on Starlette's multipart form parser, which now requires
+the `python-multipart` package at runtime. Refresh environments with `pip
+install -r requirements.txt` (or `pip install python-multipart`) before running
+the UI server and validate with `pip show python-multipart` or `python -c
+"import multipart"`. Additional rollout guidance lives in the [migration
+notes](docs/efile_suitability.md#migration).
+
 ## CRA tooling highlights
 
 - **Schema validation**: XSD-validated T1/T183/T619 XML with `sbmt_ref_id`
