@@ -90,6 +90,7 @@ def health():
             "sha": settings.build_sha,
             "efile_env": settings.efile_environment,
             "feature_efile_xml": settings.feature_efile_xml,
+            "feature_legacy_efile": settings.feature_legacy_efile,
             "sbmt_ref_id_last": last_sbmt_ref_id,
         },
         "schemas": schema_versions,
@@ -164,11 +165,13 @@ async def prepare_efile(req: TransmitRequest):
 
 @app.post("/legacy/efile")
 async def legacy_efile(req: TransmitRequest):
+    settings = getattr(app.state, "settings", get_settings())
+    if not settings.feature_legacy_efile:
+        raise HTTPException(status_code=410, detail="Legacy efile endpoint has been retired")
     issues = validate_return_input(req)
     if issues:
         raise HTTPException(status_code=400, detail=issues)
     calc = _compute_for_year(req)
-    settings = getattr(app.state, "settings", get_settings())
     profile = settings.profile()
     envelope = EfileEnvelope(
         req.software_id or profile.software_id,
