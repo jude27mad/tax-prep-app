@@ -169,6 +169,14 @@ async def prepare_efile(req: TransmitRequest):
 
 @app.post("/legacy/efile")
 async def legacy_efile(req: TransmitRequest):
+    """Handle the legacy JSON-based EFILE transport.
+
+    This path predates the XML/T619 submission flow implemented via
+    :func:`prepare_efile`/``prepare_xml_submission`` and should only be exposed
+    when the ``FEATURE_LEGACY_EFILE`` flag is enabled. Production integrations
+    are expected to migrate to the XML pathway defined in ``app.efile.service``
+    and ``app.efile.t619``.
+    """
     settings = getattr(app.state, "settings", get_settings())
     if not settings.feature_legacy_efile:
         raise HTTPException(status_code=410, detail="Legacy EFILE disabled")
@@ -177,6 +185,9 @@ async def legacy_efile(req: TransmitRequest):
     if issues:
         raise HTTPException(status_code=400, detail=issues)
     calc = _compute_for_year(req)
+    settings = getattr(app.state, "settings", get_settings())
+    # The legacy JSON transport is normally disabled unless FEATURE_LEGACY_EFILE
+    # is true. Prefer the XML/T619 workflow handled by prepare_efile.
     profile = settings.profile()
     envelope = EfileEnvelope(
         req.software_id or profile.software_id,

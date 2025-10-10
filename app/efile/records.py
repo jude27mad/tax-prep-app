@@ -1,3 +1,11 @@
+"""Legacy JSON EFILE envelope helpers.
+
+These structures power the deprecated JSON workflow used by
+``app.api.http.legacy_efile``. They exist solely for backwards compatibility
+until all callers migrate to the XML/T619 flow assembled in
+``app.efile.service``/``app.efile.t619`` and will be removed once that happens.
+"""
+
 from app.core.models import ReturnCalc, ReturnInput
 
 class EfileEnvelope:
