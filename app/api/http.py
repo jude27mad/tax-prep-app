@@ -108,7 +108,7 @@ def prepare(req: PrepareRequest):
 @app.post("/printout/t1")
 def print_t1(req: PrintRequest):
     calc = _compute_for_year(req)
-    path = render_t1_pdf(req.out_path, calc.model_dump())
+    path = render_t1_pdf(req.out_path, req, calc)
     return {"pdf": path}
 
 
