@@ -36,6 +36,11 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+> **Note**
+> Form submissions in the FastAPI apps rely on `python-multipart`, which is
+> included in `requirements.txt`. Ensure your environment picks up the updated
+> dependency when reinstalling requirements.
+
 ## Guided wizard (no JSON typing)
 
 The estimator now includes a prompt-driven CLI so you can answer questions
