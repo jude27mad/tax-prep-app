@@ -13,6 +13,7 @@ from tests.fixtures.min_client import make_min_input
 def _prime_state():
     app.state.settings = Settings(
         feature_efile_xml=True,
+        feature_legacy_efile=True,
         efile_environment="CERT",
         endpoint_cert="http://localhost:9999",
         software_id_cert="X",
