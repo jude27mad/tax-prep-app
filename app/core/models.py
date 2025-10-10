@@ -2,6 +2,30 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 from datetime import date, datetime
 
+
+class T4ASlip(BaseModel):
+  pension_income: Decimal | None = None
+  other_income: Decimal | None = None
+  self_employment_commissions: Decimal | None = None
+  research_grants: Decimal | None = None
+  tax_deducted: Decimal | None = None
+
+
+class T5Slip(BaseModel):
+  interest_income: Decimal | None = None
+  eligible_dividends: Decimal | None = None
+  other_dividends: Decimal | None = None
+  capital_gains: Decimal | None = None
+  foreign_income: Decimal | None = None
+  foreign_tax_withheld: Decimal | None = None
+
+
+class TuitionSlip(BaseModel):
+  institution_name: str | None = None
+  eligible_tuition: Decimal = Decimal("0.00")
+  months_full_time: int = 0
+  months_part_time: int = 0
+
 class Taxpayer(BaseModel):
   sin: str
   first_name: str
@@ -30,7 +54,12 @@ class ReturnInput(BaseModel):
   taxpayer: Taxpayer
   household: Household | None = None
   slips_t4: list[T4Slip] = Field(default_factory=list)
+  slips_t4a: list[T4ASlip] = Field(default_factory=list)
+  slips_t5: list[T5Slip] = Field(default_factory=list)
+  tuition_slips: list[TuitionSlip] = Field(default_factory=list)
   rrsp_contrib: Decimal = Decimal("0.00")
+  tuition_claim: Decimal = Decimal("0.00")
+  tuition_transfer_to_spouse: Decimal = Decimal("0.00")
   t183_signed_ts: datetime | None = None
   t183_ip_hash: str | None = None
   t183_user_agent_hash: str | None = None
