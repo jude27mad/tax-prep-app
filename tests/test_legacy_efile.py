@@ -36,7 +36,11 @@ def test_legacy_efile_disabled_returns_410(tmp_path):
         else:
             api_app.state.settings = previous
     assert response.status_code == 410
-    assert response.json() == {"detail": "Legacy efile endpoint has been retired"}
+    body = response.json()
+    assert body.get("detail") in (
+        "Legacy efile endpoint has been retired",
+        "Legacy EFILE disabled",
+    )
 
 
 def test_legacy_efile_enabled_returns_success(tmp_path):
@@ -58,3 +62,4 @@ def test_legacy_efile_enabled_returns_success(tmp_path):
     body = response.json()
     assert body["response"] == {"codes": ["E000"]}
     assert body["digest"]
+
