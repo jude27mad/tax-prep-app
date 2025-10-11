@@ -8,6 +8,7 @@ import secrets
 import string
 from typing import Any
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 from fastapi import FastAPI, HTTPException
 
@@ -16,7 +17,7 @@ from app.core.models import ReturnCalc, ReturnInput
 from app.core.validate.pre_submit import Identity, ValidationIssue, validate_before_efile
 from app.efile.records import EfileEnvelope
 from app.efile.t183 import mask_sin
-from app.efile.t619 import T619Package, build_t619_package
+from app.efile.t619 import NS_T619, T619Package, build_t619_package
 
 
 
@@ -149,6 +150,12 @@ def prepare_xml_submission(
         "SoftwareVersion": profile.software_version,
         "TransmitterId": profile.transmitter_id,
     }
+    transmitter_account = getattr(req, "transmitter_account_mm", None)
+    if transmitter_account:
+        profile_dict["TransmitterAccount"] = transmitter_account
+    rep_id = getattr(req, "rep_id", None)
+    if rep_id:
+        profile_dict["RepID"] = rep_id
 
     sbmt_ref_id = _generate_sbmt_ref_id()
     package = build_t619_package(req, calc, profile_dict, schema_cache, sbmt_ref_id)
@@ -182,6 +189,29 @@ def prepare_xml_submission(
         xml_bytes=xml_bytes,
         endpoint=endpoint,
     )
+
+
+def validate_t619_preflight(package: T619Package) -> list[str]:
+    try:
+        root = ET.fromstring(package.envelope_xml)
+    except ET.ParseError:
+        return ["T619 envelope XML is malformed"]
+
+    def _value(tag: str) -> str:
+        text = root.findtext(f"{{{NS_T619}}}{tag}")
+        return text.strip() if text else ""
+
+    errors: list[str] = []
+
+    if not _value("sbmt_ref_id"):
+        errors.append("T619 envelope is missing sbmt_ref_id")
+
+    has_mm = bool(_value("TransmitterAccount"))
+    has_rep = bool(_value("RepID"))
+    if not (has_mm or has_rep):
+        errors.append("T619 envelope must include TransmitterAccount (MM) or RepID")
+
+    return errors
 
 
 def pii_safe_context(req: ReturnInput) -> dict[str, Any]:

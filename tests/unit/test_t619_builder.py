@@ -24,12 +24,14 @@ def test_build_t619_package():
         "SoftwareId": "X",
         "SoftwareVersion": "0.1.0",
         "TransmitterId": "T",
+        "RepID": "RP1234567",
     }
     sbmt_ref_id = "CERT0001"
     package = build_t619_package(req, calc, profile, _schema_cache(), sbmt_ref_id)
     assert package.sbmt_ref_id == sbmt_ref_id
     assert "<T1Return" in package.t1_xml
     assert "<sbmt_ref_id>CERT0001</sbmt_ref_id>" in package.envelope_xml
+    assert "<RepID>RP1234567</RepID>" in package.envelope_xml
     payload = _decode_payload(package.envelope_xml)
     assert payload["T1Return.xml"] == package.payload_documents["T1Return"]
     assert payload["T183Authorization.xml"] == package.payload_documents["T183Authorization"]
