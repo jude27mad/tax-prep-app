@@ -14,6 +14,7 @@ def _prime_state():
     app.state.settings = Settings(
         feature_efile_xml=True,
         feature_legacy_efile=False,
+        feature_2025_transmit=False,
         efile_window_open=True,
         efile_environment="CERT",
         endpoint_cert="http://localhost:9999",
@@ -33,7 +34,7 @@ def _prime_state():
 @pytest.mark.asyncio
 async def test_transmit_path():
     _prime_state()
-    req = json.loads(make_min_input().model_dump_json())
+    req = json.loads(make_min_input(tax_year=2024).model_dump_json())
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         with patch("app.efile.transmit.EfileClient.send", new=AsyncMock(return_value={"codes": ["E000"]})):

@@ -11,8 +11,10 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile  # for type-narrowing form inputs
 
+from app.config import Settings, get_settings
 from app.core.models import ReturnInput
 from app.core.validate.pre_submit import validate_return_input
+from app.efile.gating import build_transmit_gate
 from app.wizard import (
     BASE_DIR,
     CLI_BOOL_FIELDS,
@@ -96,6 +98,28 @@ FIELD_METADATA: dict[str, dict[str, Any]] = {
 
 def _format_currency(value: float | int) -> str:
     return f"${value:,.2f}"
+
+
+def _resolve_settings(request: Request) -> Settings:
+    settings = getattr(request.app.state, "settings", None)
+    if isinstance(settings, Settings):
+        return settings
+    return get_settings()
+
+
+def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    gate = build_transmit_gate(settings=settings)
+    selected_year = str(state.get("tax_year", ""))
+    entry = gate.get(selected_year, {"allowed": False, "message": ""})
+    allowed = bool(entry.get("allowed"))
+    message = str(entry.get("message", "")) if not allowed else ""
+    years = sorted(int(year) for year in gate.keys())
+    return {
+        "supported_tax_years": years,
+        "efile_transmit_gate": gate,
+        "efile_selected_year_allowed": allowed,
+        "efile_selected_year_message": message,
+    }
 
 
 def _friendly_profile_path(slug: str) -> str:
@@ -576,6 +600,7 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
 
 @router.get("/returns/new", response_class=HTMLResponse)
 def new_return(request: Request) -> HTMLResponse:
+    settings = _resolve_settings(request)
     context: dict[str, Any] = {
         "request": request,
         "form_state": _default_return_form_state(),
@@ -589,6 +614,7 @@ def new_return(request: Request) -> HTMLResponse:
         "format_currency": _format_currency,
         "messages": [],
     }
+    context.update(_transmit_gate_context(context["form_state"], settings))
     return TEMPLATES.TemplateResponse("return_form.html", context)
 
 
@@ -614,6 +640,7 @@ async def prepare_return(request: Request) -> HTMLResponse:
             calc_dump = calc.model_dump(mode="json")
             calc_json = json.dumps(calc_dump, indent=2)
 
+    settings = _resolve_settings(request)
     context: dict[str, Any] = {
         "request": request,
         "form_state": state,
@@ -630,6 +657,7 @@ async def prepare_return(request: Request) -> HTMLResponse:
     if payload is None:
         messages.append("Please review the highlighted fields before continuing.")
     context["messages"] = messages
+    context.update(_transmit_gate_context(state, settings))
     return TEMPLATES.TemplateResponse("return_form.html", context, status_code=status_code)
 
 

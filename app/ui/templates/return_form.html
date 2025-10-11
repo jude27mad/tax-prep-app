@@ -85,6 +85,23 @@
       flex-wrap: wrap;
       margin-top: 1rem;
     }
+    .status-note {
+      font-size: 0.85rem;
+      align-self: center;
+      color: #9a3412;
+    }
+    .status-note.warning {
+      font-weight: 600;
+    }
+    .btn[disabled] {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    .field-help {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: #4b5563;
+    }
     .artifact-list {
       margin-top: 0.5rem;
       padding-left: 1.2rem;
@@ -261,6 +278,17 @@
             <span>Tax year</span>
             <input name="tax_year" inputmode="numeric" value="{{ form_state.tax_year }}" />
             {% if field_errors.get('tax_year') %}<div class="field-error">{{ field_errors.get('tax_year') }}</div>{% endif %}
+            {% if supported_tax_years %}
+              <div class="field-help">
+                {% for year in supported_tax_years %}
+                  {% set year_key = year|string %}
+                  {% set info = efile_transmit_gate.get(year_key) %}
+                  <div class="year-availability" data-tax-year="{{ year }}">
+                    {{ year }} — {% if info and info.allowed %}Transmit enabled{% else %}<strong>Estimate only</strong>{% endif %}
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
           </label>
           <label class="field">
             <span>RRSP contributions</span>
@@ -377,6 +405,11 @@
     <div class="actions-row">
       <button type="button" id="print-button" class="btn">Render T1 PDF</button>
       <button type="button" id="efile-button" class="btn">Transmit via EFILE</button>
+      <span
+        id="efile-availability-note"
+        class="status-note{% if not efile_selected_year_allowed %} warning{% endif %}"
+        {% if efile_selected_year_allowed or not efile_selected_year_message %}hidden{% endif %}
+      >{{ efile_selected_year_message }}</span>
     </div>
     <div id="print-status" class="status-box" hidden></div>
     <div id="efile-status" class="status-box" hidden></div>
@@ -421,6 +454,8 @@
     </div>
   </template>
 
+  <script id="transmit-gate-data" type="application/json">{{ efile_transmit_gate | tojson }}</script>
+
   <script>
     const form = document.getElementById("return-form");
     const slipContainer = document.getElementById("t4-slips");
@@ -438,6 +473,18 @@
     const addSlipButton = document.getElementById("add-slip");
     const printButton = document.getElementById("print-button");
     const efileButton = document.getElementById("efile-button");
+    const efileAvailabilityNote = document.getElementById("efile-availability-note");
+    const transmitGateData = document.getElementById("transmit-gate-data");
+    const taxYearField = form?.elements.namedItem("tax_year");
+
+    let transmitGate = {};
+    if (transmitGateData && transmitGateData.textContent) {
+      try {
+        transmitGate = JSON.parse(transmitGateData.textContent);
+      } catch (err) {
+        console.warn("Unable to parse transmit gate data", err);
+      }
+    }
 
     let nextSlipIndex = 0;
     document.querySelectorAll(".t4-slip").forEach((node) => {
@@ -457,6 +504,32 @@
       box.classList.remove("success", "warning", "error");
       if (variant) {
         box.classList.add(variant);
+      }
+    }
+
+    function transmitEntryForYear(yearValue) {
+      const normalized = String(yearValue || "");
+      if (Object.prototype.hasOwnProperty.call(transmitGate, normalized)) {
+        return transmitGate[normalized];
+      }
+      return { allowed: false, message: "" };
+    }
+
+    function updateEfileAvailability() {
+      if (!efileButton) return;
+      const fallbackYear = Object.keys(transmitGate)[0] || "";
+      const yearText = formValue("tax_year") || String(fallbackYear);
+      const entry = transmitEntryForYear(yearText);
+      const allowed = Boolean(entry?.allowed);
+      efileButton.disabled = !allowed;
+      if (efileAvailabilityNote) {
+        const message = allowed ? "" : entry?.message || `${yearText} — Estimate only.`;
+        efileAvailabilityNote.textContent = message;
+        efileAvailabilityNote.hidden = !message;
+        efileAvailabilityNote.classList.toggle("warning", !allowed && Boolean(message));
+      }
+      if (efileButton) {
+        efileButton.title = allowed ? "" : entry?.message || "Transmission is disabled.";
       }
     }
 
@@ -653,6 +726,7 @@
     async function handlePrepare(event) {
       event.preventDefault();
       const payload = buildPayload();
+      updateEfileAvailability();
       setStatus(prepareStatus, "Computing return…");
       toggleIssues([]);
       prepareResults.hidden = false;
@@ -725,6 +799,13 @@
         software_ver: softwareVer || null,
         transmitter_id: transmitterId || null,
       };
+      const taxYearEntry = transmitEntryForYear(payload.tax_year);
+      if (!taxYearEntry.allowed) {
+        const detail = taxYearEntry.message || `${payload.tax_year} — Estimate only. Transmission is disabled.`;
+        setStatus(efileStatus, detail, "warning");
+        updateEfileAvailability();
+        return;
+      }
       setStatus(efileStatus, "Preparing EFILE submission…");
       try {
         const response = await fetch("/prepare/efile", {
@@ -754,6 +835,9 @@
     }
     printButton?.addEventListener("click", handlePrint);
     efileButton?.addEventListener("click", handleEfile);
+    taxYearField?.addEventListener("input", updateEfileAvailability);
+    taxYearField?.addEventListener("change", updateEfileAvailability);
     updateRemoveButtons();
+    updateEfileAvailability();
   </script>
 {% endblock %}
