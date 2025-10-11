@@ -15,6 +15,7 @@ def _configure_settings(tmp_path) -> Settings:
     settings = Settings(
         feature_efile_xml=True,
         feature_legacy_efile=True,
+        efile_window_open=True,
         artifact_root=str(artifacts),
         daily_summary_root=str(summaries),
         endpoint_cert="http://127.0.0.1:9000",
@@ -96,3 +97,41 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
     download_response = client.get("/ui/artifacts/download", params={"path": artifact_entry["path"]})
     assert download_response.status_code == 200
     assert download_response.content.startswith(b"<xml")
+
+
+def test_prepare_efile_window_closed(tmp_path):
+    settings = Settings(
+        feature_efile_xml=True,
+        feature_legacy_efile=False,
+        efile_window_open=False,
+        artifact_root=str(tmp_path / "artifacts"),
+        daily_summary_root=str(tmp_path / "summaries"),
+        endpoint_cert="http://127.0.0.1:9000",
+        endpoint_prod="http://127.0.0.1:9000",
+    )
+    api_app.state.settings = settings
+    api_app.state.artifact_root = Path(settings.artifact_root)
+    api_app.state.daily_summary_root = Path(settings.daily_summary_root)
+    api_app.state.submission_digests = set()
+    api_app.state.summary_index = {}
+
+    client = TestClient(api_app)
+    payload = make_min_input().model_dump(mode="json")
+    response = client.post("/prepare/efile", json=payload)
+    assert response.status_code == 503
+    assert response.json()["detail"] == "CRA EFILE window not yet open for 2025"
+
+
+def test_prepare_efile_rejects_wrong_year(tmp_path):
+    settings = _configure_settings(tmp_path)
+    api_app.state.settings = settings
+    api_app.state.artifact_root = Path(settings.artifact_root)
+    api_app.state.daily_summary_root = Path(settings.daily_summary_root)
+    api_app.state.submission_digests = set()
+    api_app.state.summary_index = {}
+
+    client = TestClient(api_app)
+    payload = make_min_input(tax_year=2024).model_dump(mode="json")
+    response = client.post("/prepare/efile", json=payload)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "EFILE XML is only available for 2025 filings"
