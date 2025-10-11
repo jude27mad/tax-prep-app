@@ -41,7 +41,7 @@ def _register_reportlab_fonts(logger: logging.Logger) -> list[str]:
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-    except Exception as exc:  # pragma: no cover - reportlab should be present but guard regardless
+    except Exception as exc:  # pragma: no cover
         logger.warning("ReportLab unavailable, cannot register fonts: %s", exc)
         return registered_now
 
@@ -58,7 +58,7 @@ def _register_reportlab_fonts(logger: logging.Logger) -> list[str]:
             pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
             _REGISTERED_FONTS.add(font_name)
             registered_now.append(font_name)
-        except Exception as exc:  # pragma: no cover - defensive logging
+        except Exception as exc:  # pragma: no cover
             logger.warning("Failed to register ReportLab font %s: %s", font_path, exc)
     return registered_now
 
@@ -84,7 +84,7 @@ async def _invoke_hook(hook: Hook | None, app: FastAPI) -> None:
         result = hook(app)
         if inspect.isawaitable(result):
             await result  # type: ignore[func-returns-value]
-    except Exception:  # pragma: no cover - hooks are user provided
+    except Exception:  # pragma: no cover
         logging.getLogger("tax_app").exception("Application lifecycle hook failed")
 
 
@@ -97,13 +97,11 @@ def build_application_lifespan(
 ) -> Callable[[FastAPI], AsyncContextManager[None]]:
     base_logger = logging.getLogger("tax_app")
 
-    # Soft-require python-multipart: warn if missing, but don't crash tests
+    # Hard-require python-multipart for form parsing (unit test asserts RuntimeError)
     try:
         importlib.import_module("multipart")
-        _form_parsing_available = True
-    except ImportError:  # pragma: no cover
-        _form_parsing_available = False
-        base_logger.warning("python-multipart not installed; form parsing disabled. Install python-multipart to enable.")
+    except ImportError as exc:  # pragma: no cover - covered by dedicated unit test
+        raise RuntimeError("Install python-multipart to enable form parsing") from exc
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -126,7 +124,6 @@ def build_application_lifespan(
         app.state.summary_index = {}
         app.state.telemetry_handler = telemetry_handler
         app.state.app_label = app_label
-        app.state.form_parsing_available = _form_parsing_available
 
         logger.info(
             "Startup complete: schemas=%s fonts_registered=%s", len(schema_cache), len(registered_fonts)
@@ -139,7 +136,7 @@ def build_application_lifespan(
             await _invoke_hook(shutdown_hook, app)
             try:
                 await http_client.aclose()
-            except Exception as exc:  # pragma: no cover - defensive logging
+            except Exception as exc:  # pragma: no cover
                 logger.warning("Failed to close shared httpx client: %s", exc)
             if telemetry_handler is not None:
                 logger.removeHandler(telemetry_handler)
@@ -157,7 +154,6 @@ def build_application_lifespan(
                 "summary_index",
                 "last_sbmt_ref_id",
                 "app_label",
-                "form_parsing_available",
             ):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)
