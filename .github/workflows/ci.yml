@@ -14,3 +14,21 @@ jobs:
       - run: mypy app
       - run: pytest -q
       - run: python -m app.main --data tests/fixtures/user_data.toml --profile sample --quick --color never --no-save
+
+  cert-rehearsal:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Run CERT rehearsal bundle
+        env:
+          EFILE_ENV: CERT
+          FEATURE_EFILE_XML: "1"
+          EFILE_WINDOW_OPEN: "1"
+        run: python scripts/cert_rehearsal.py --bundle-root cert_bundle

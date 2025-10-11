@@ -11,6 +11,7 @@ __pycache__/
 *.so
 logs/
 artifacts/
+cert_bundle/
 
 tests/.tmp_*/
 .hypothesis/
