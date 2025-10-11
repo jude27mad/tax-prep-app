@@ -7,7 +7,15 @@ from app.core.provinces import get_provincial_calculator
 from app.core.provinces.ab import ab_credits_2025, ab_tax_on_taxable_income_2025
 from app.core.provinces.bc import bc_credits_2025, bc_tax_on_taxable_income_2025
 from app.core.provinces.mb import mb_credits_2025, mb_tax_on_taxable_income_2025
+from app.core.provinces.nb import nb_credits_2025, nb_tax_on_taxable_income_2025
+from app.core.provinces.nl import nl_credits_2025, nl_tax_on_taxable_income_2025
+from app.core.provinces.ns import ns_credits_2025, ns_tax_on_taxable_income_2025
+from app.core.provinces.nt import nt_credits_2025, nt_tax_on_taxable_income_2025
+from app.core.provinces.nu import nu_credits_2025, nu_tax_on_taxable_income_2025
 from app.core.provinces.on import on_surtax_2025
+from app.core.provinces.pe import pe_credits_2025, pe_tax_on_taxable_income_2025
+from app.core.provinces.sk import sk_credits_2025, sk_tax_on_taxable_income_2025
+from app.core.provinces.yt import yt_credits_2025, yt_tax_on_taxable_income_2025
 from app.core.slips import sum_rrsp_contributions, sum_t4a_income, sum_t5_income
 from app.core.tax_years.y2025.calc import compute_full_2025
 from tests.fixtures.min_client import make_min_input, make_provincial_examples
@@ -36,6 +44,14 @@ def test_end_to_end_sample_2025():
         ("AB", ab_tax_on_taxable_income_2025, ab_credits_2025),
         ("BC", bc_tax_on_taxable_income_2025, bc_credits_2025),
         ("MB", mb_tax_on_taxable_income_2025, mb_credits_2025),
+        ("SK", sk_tax_on_taxable_income_2025, sk_credits_2025),
+        ("NS", ns_tax_on_taxable_income_2025, ns_credits_2025),
+        ("NB", nb_tax_on_taxable_income_2025, nb_credits_2025),
+        ("NL", nl_tax_on_taxable_income_2025, nl_credits_2025),
+        ("PE", pe_tax_on_taxable_income_2025, pe_credits_2025),
+        ("YT", yt_tax_on_taxable_income_2025, yt_credits_2025),
+        ("NT", nt_tax_on_taxable_income_2025, nt_credits_2025),
+        ("NU", nu_tax_on_taxable_income_2025, nu_credits_2025),
     ],
 )
 def test_core_provincial_calculators_align_with_exports(province, tax_fn, credit_fn):
