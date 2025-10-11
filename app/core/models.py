@@ -142,6 +142,8 @@ class ReturnInput(BaseModel):
     t183_pdf_path: str | None = None
     province: str = "ON"
     tax_year: int = 2025
+    transmitter_account_mm: str | None = None
+    rep_id: str | None = None
 
 
 class ReturnCalc(BaseModel):

@@ -24,6 +24,8 @@ def _prime_state():
         artifact_root=str(Path('tests/.tmp_artifacts')),
         daily_summary_root=str(Path('tests/.tmp_summaries')),
     )
+    app.state.submission_digests = set()
+    app.state.summary_index = {}
     schema_cache = {
         schema_path.name: schema_path.read_text()
         for schema_path in Path("app/schemas").glob("*.xsd")
@@ -47,3 +49,32 @@ async def test_transmit_path():
     assert body["sbmt_ref_id"]
     assert len(body["sbmt_ref_id"]) == 8
     assert body["sbmt_ref_id"].isalnum()
+
+
+@pytest.mark.asyncio
+async def test_transmit_requires_ids():
+    _prime_state()
+    req = json.loads(
+        make_min_input(transmitter_account_mm=None, rep_id=None).model_dump_json()
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch("app.efile.transmit.EfileClient.send", new=AsyncMock(return_value={"codes": ["E000"]})):
+            r = await ac.post("/prepare/efile", json=req)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "errors" in detail
+    assert any("TransmitterAccount" in msg or "RepID" in msg for msg in detail["errors"])
+
+
+@pytest.mark.asyncio
+async def test_transmit_allows_mm_without_rep():
+    _prime_state()
+    req = json.loads(
+        make_min_input(transmitter_account_mm="MM123456", rep_id=None).model_dump_json()
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch("app.efile.transmit.EfileClient.send", new=AsyncMock(return_value={"codes": ["E000"]})):
+            r = await ac.post("/prepare/efile", json=req)
+    assert r.status_code == 200

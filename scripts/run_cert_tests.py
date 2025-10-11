@@ -13,13 +13,17 @@ from fastapi import FastAPI
 from app.api.http import _compute_for_year, app as preparer_app
 from app.core.models import ReturnInput
 from app.efile.error_map import explain_error
-from app.efile.service import prepare_xml_submission
+from app.efile.service import prepare_xml_submission, validate_t619_preflight
 from app.efile.transmit import EfileClient
 
 
 async def _run_case(app: FastAPI, case: ReturnInput, artifact_dir: Path) -> dict:
     calc = _compute_for_year(case)
     prepared = prepare_xml_submission(app, case, calc)
+
+    preflight_errors = validate_t619_preflight(prepared.package)
+    if preflight_errors:
+        raise RuntimeError(f"T619 preflight failed: {'; '.join(preflight_errors)}")
 
     suffix = case.taxpayer.sin[-4:] if case.taxpayer.sin else "anon"
     xml_path = artifact_dir / f"{prepared.sbmt_ref_id}_{suffix}_request.xml"

@@ -23,6 +23,7 @@ def test_t619_matches_golden():
         "SoftwareId": "TAXAPP-CERT",
         "SoftwareVersion": "0.0.3",
         "TransmitterId": "900000",
+        "RepID": "RP1234567",
     }
     package = build_t619_package(req, calc, profile, _schema_cache(), "CERTX999")
     assert package.sbmt_ref_id == "CERTX999"

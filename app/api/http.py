@@ -11,6 +11,7 @@ from app.efile.service import (
     pii_safe_context,
     prepare_xml_submission,
     record_transmit_outcome,
+    validate_t619_preflight,
 )
 from app.efile.transmit import CircuitOpenError, EfileClient
 from ..efile.records import EfileEnvelope, build_records
@@ -146,6 +147,15 @@ async def prepare_efile(req: TransmitRequest):
 
     context = pii_safe_context(req)
     context["sbmt_ref_id"] = prepared.sbmt_ref_id
+
+    preflight_errors = validate_t619_preflight(prepared.package)
+    if preflight_errors:
+        logger.error(
+            "T619 preflight validation failed",
+            extra={"submission": context, "errors": preflight_errors},
+        )
+        raise HTTPException(status_code=422, detail={"errors": preflight_errors})
+
     logger.info("Prepared EFILE XML payload", extra={"submission": context})
 
     client = EfileClient(prepared.endpoint)

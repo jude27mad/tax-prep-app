@@ -44,6 +44,18 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
         file_path = artifact_root / f"{sbmt_ref_id_value}_{digest_value}_envelope.xml"
         file_path.write_text("<xml />", encoding="utf-8")
 
+        envelope_xml = (
+            "<T619Transmission xmlns=\"http://www.cra-arc.gc.ca/xmlns/efile/t619/1.0\">"
+            f"<sbmt_ref_id>{sbmt_ref_id_value}</sbmt_ref_id>"
+            "<Environment>CERT</Environment>"
+            "<SoftwareId>TEST-SW</SoftwareId>"
+            "<SoftwareVersion>1.0.0</SoftwareVersion>"
+            "<TransmitterId>123456</TransmitterId>"
+            "<RepID>RP1234567</RepID>"
+            "<Payload>DATA</Payload>"
+            "</T619Transmission>"
+        )
+
         class DummyEnvelope:  # noqa: WPS430
             software_id = "TEST-SW"
             software_ver = "1.0.0"
@@ -52,7 +64,7 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
 
         return SimpleNamespace(
             envelope=DummyEnvelope(),
-            package=SimpleNamespace(),
+            package=SimpleNamespace(envelope_xml=envelope_xml),
             digest=digest_value,
             sbmt_ref_id=sbmt_ref_id_value,
             xml_bytes=b"<xml />",

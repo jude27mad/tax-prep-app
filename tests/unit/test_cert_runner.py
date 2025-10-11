@@ -24,6 +24,19 @@ async def test_cert_runner_saves_artifacts(tmp_path, monkeypatch):
             endpoint="http://localhost:8000",
             digest="deadbeef",
             sbmt_ref_id="CERT0001",
+            package=SimpleNamespace(
+                envelope_xml=(
+                    "<T619Transmission xmlns=\"http://www.cra-arc.gc.ca/xmlns/efile/t619/1.0\">"
+                    "<sbmt_ref_id>CERT0001</sbmt_ref_id>"
+                    "<Environment>CERT</Environment>"
+                    "<SoftwareId>SW</SoftwareId>"
+                    "<SoftwareVersion>1.0</SoftwareVersion>"
+                    "<TransmitterId>TRN</TransmitterId>"
+                    "<RepID>RP1234567</RepID>"
+                    "<Payload>DATA</Payload>"
+                    "</T619Transmission>"
+                )
+            ),
         )
 
     with patch.object(run_cert_tests, "prepare_xml_submission", new=fake_prepare):
