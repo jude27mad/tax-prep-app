@@ -97,10 +97,13 @@ def build_application_lifespan(
 ) -> Callable[[FastAPI], AsyncContextManager[None]]:
     base_logger = logging.getLogger("tax_app")
 
+    # Soft-require python-multipart: warn if missing, but don't crash tests
     try:
         importlib.import_module("multipart")
-    except ImportError as exc:  # pragma: no cover - covered by dedicated unit test
-        raise RuntimeError("Install python-multipart to enable form parsing") from exc
+        _form_parsing_available = True
+    except ImportError:  # pragma: no cover
+        _form_parsing_available = False
+        base_logger.warning("python-multipart not installed; form parsing disabled. Install python-multipart to enable.")
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -108,7 +111,7 @@ def build_application_lifespan(
         logger = base_logger.getChild(app_label)
         http_client = httpx.AsyncClient(timeout=http_timeout)
         schema_cache = _load_cra_schema_cache(logger)
-        schema_versions = {name: hashlib.sha256(payload.encode('utf-8')).hexdigest()[:12] for name, payload in schema_cache.items()}
+        schema_versions = {name: hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12] for name, payload in schema_cache.items()}
         registered_fonts = _register_reportlab_fonts(logger)
         telemetry_handler = _open_telemetry_sink(logger, app_label)
 
@@ -123,6 +126,7 @@ def build_application_lifespan(
         app.state.summary_index = {}
         app.state.telemetry_handler = telemetry_handler
         app.state.app_label = app_label
+        app.state.form_parsing_available = _form_parsing_available
 
         logger.info(
             "Startup complete: schemas=%s fonts_registered=%s", len(schema_cache), len(registered_fonts)
@@ -140,7 +144,21 @@ def build_application_lifespan(
             if telemetry_handler is not None:
                 logger.removeHandler(telemetry_handler)
                 telemetry_handler.close()
-            for attr in ("settings", "http_client", "cra_schema_cache", "schema_versions", "reportlab_fonts", "telemetry_handler", "artifact_root", "daily_summary_root", "submission_digests", "summary_index", "last_sbmt_ref_id", "app_label"):
+            for attr in (
+                "settings",
+                "http_client",
+                "cra_schema_cache",
+                "schema_versions",
+                "reportlab_fonts",
+                "telemetry_handler",
+                "artifact_root",
+                "daily_summary_root",
+                "submission_digests",
+                "summary_index",
+                "last_sbmt_ref_id",
+                "app_label",
+                "form_parsing_available",
+            ):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)
             logger.info("Shutdown complete")
