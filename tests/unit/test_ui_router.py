@@ -47,6 +47,23 @@ def test_profiles_home_lists_profiles(tmp_path, monkeypatch):
     assert "alice" in response.text
 
 
+def test_create_profile_accepts_multipart(tmp_path, monkeypatch):
+    base = _configure_profiles_dirs(monkeypatch, tmp_path)
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles",
+        data={"name": "Test User"},
+        files={"__dummy_file": ("notes.txt", b"notes", "text/plain")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/ui/profiles/test-user?created=1")
+    assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
+    assert (base / "profiles" / "test-user.toml").exists()
+
+
 def test_preview_displays_summary(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
 
@@ -103,6 +120,25 @@ def test_new_return_form_renders(monkeypatch, tmp_path):
     assert "Return input" in body
     assert "name=\"taxpayer_sin\"" in body
     assert "Compute return" in body
+
+
+def test_save_profile_accepts_multipart(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    profiles.save_profile_data("tester", {})
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles/tester",
+        data={"box14": "55000", "province": "ON"},
+        files={"__dummy_file": ("notes.txt", b"notes", "text/plain")},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/ui/profiles/tester?saved=1")
+    assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
+    saved_data, _, _ = profiles.load_profile("tester")
+    assert saved_data.get("box14") == 55000
 
 
 def test_prepare_return_handles_valid_form(monkeypatch, tmp_path):
