@@ -5,7 +5,7 @@ import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from app.config import get_settings
 
@@ -19,7 +19,9 @@ RETENTION_YEARS = 6
 @dataclass
 class T183Record:
     taxpayer_sin_masked: str
+    filed_at: datetime
     signed_at: datetime
+    esign_accepted_at: Optional[datetime]
     expires_at: datetime
     ip_hash: Optional[str]
     user_agent_hash: Optional[str]
@@ -36,21 +38,43 @@ def retention_path(base: str, tax_year: int, sin: str) -> Path:
     return p
 
 
-def _compute_expiry(signed_at: datetime) -> datetime:
+def _compute_expiry(filed_at: datetime) -> datetime:
     try:
-        return signed_at.replace(year=signed_at.year + RETENTION_YEARS)
+        return filed_at.replace(year=filed_at.year + RETENTION_YEARS)
     except ValueError:
-        return signed_at + (datetime(signed_at.year + RETENTION_YEARS, 3, 1) - datetime(signed_at.year, 3, 1))
+        return filed_at + (
+            datetime(filed_at.year + RETENTION_YEARS, 3, 1, tzinfo=filed_at.tzinfo)
+            - datetime(filed_at.year, 3, 1, tzinfo=filed_at.tzinfo)
+        )
 
 
 
 
-def build_record(original_sin: str, signed_at: datetime, pdf_path: str, ip_hash: Optional[str] = None, user_agent_hash: Optional[str] = None) -> T183Record:
+def _ensure_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def build_record(
+    original_sin: str,
+    signed_at: datetime,
+    filed_at: datetime,
+    pdf_path: str,
+    ip_hash: Optional[str] = None,
+    user_agent_hash: Optional[str] = None,
+    esign_accepted_at: Optional[datetime] = None,
+) -> T183Record:
     masked = mask_sin(original_sin)
-    expires = _compute_expiry(signed_at)
+    signed_at_utc = _ensure_utc(signed_at)
+    filed_at_utc = _ensure_utc(filed_at)
+    accepted_at_utc = _ensure_utc(esign_accepted_at) if esign_accepted_at else None
+    expires = _compute_expiry(filed_at_utc)
     return T183Record(
         taxpayer_sin_masked=masked,
-        signed_at=signed_at,
+        filed_at=filed_at_utc,
+        signed_at=signed_at_utc,
+        esign_accepted_at=accepted_at_utc,
         expires_at=expires,
         ip_hash=ip_hash,
         user_agent_hash=user_agent_hash,
@@ -61,17 +85,18 @@ def build_record(original_sin: str, signed_at: datetime, pdf_path: str, ip_hash:
 def _store_authorization(record: T183Record, base_dir: str, tax_year: int, original_sin: str, prefix: str) -> str:
     target_dir = retention_path(base_dir, tax_year, original_sin)
     payload = asdict(record)
-    payload["retention_years"] = RETENTION_YEARS
-    raw = json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8")
+    serialized: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, datetime):
+            serialized[key] = value.isoformat()
+        else:
+            serialized[key] = value
+    serialized["retention_years"] = RETENTION_YEARS
+    raw = json.dumps(serialized, separators=(",", ":")).encode("utf-8")
     encrypted = encrypt(raw)
-    is_encrypted = encrypted != raw
-    suffix = "enc" if is_encrypted else "json"
-    filename = f"{prefix}_{int(record.signed_at.timestamp())}.{suffix}"
+    filename = f"{prefix}_{int(record.filed_at.timestamp())}.enc"
     path = target_dir / filename
-    if is_encrypted:
-        path.write_bytes(encrypted)
-    else:
-        path.write_text(raw.decode("utf-8"), encoding="utf-8")
+    path.write_bytes(encrypted)
     return str(path)
 
 
@@ -98,9 +123,11 @@ def _purge_authorizations(base_dir: str, prefix: str, as_of: Optional[datetime])
         if file.suffix not in {".json", ".enc"}:
             continue
         try:
-            payload_bytes = file.read_bytes() if file.suffix == ".enc" else file.read_text(encoding="utf-8").encode("utf-8")
-            plaintext = decrypt(payload_bytes)
-            data = json.loads(plaintext.decode("utf-8"))
+            if file.suffix == ".enc":
+                payload_bytes = decrypt(file.read_bytes())
+            else:
+                payload_bytes = file.read_bytes()
+            data = json.loads(payload_bytes.decode("utf-8"))
             expires_at = datetime.fromisoformat(data["expires_at"])
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)

@@ -139,7 +139,7 @@ Key environment variables (defaults shown):
 | `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs | `900000`, `900001` |
 | `EFILE_ENDPOINT_CERT` / `EFILE_ENDPOINT_PROD` | CRA endpoints | `http://127.0.0.1:9000`, `https://prod-placeholder` |
 | `SOFTWARE_VERSION` | Application version string | `0.0.3` |
-| `T183_CRYPTO_KEY` | Optional Fernet key for encrypted T183/T2183 retention | unset |
+| `T183_CRYPTO_KEY` | Fernet key for encrypted T183/T2183 retention (required) | unset |
 | `RETENTION_T2183_ENABLED` | Toggle T2183 retention | `false` |
 
 Set variables in the terminal before launching the preparer API, for example:
