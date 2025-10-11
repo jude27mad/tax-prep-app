@@ -1,10 +1,9 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable, Mapping
 
-from app.core.provinces import ab, bc, mb, on
+from app.core.provinces import ab, bc, mb, nb, nl, ns, nt, nu, on, pe, sk, yt
 
 D = Decimal
 
@@ -28,7 +27,47 @@ _PROVINCE_CALCULATORS_BY_YEAR: dict[int, dict[str, ProvincialCalculator]] = {
             tax=on.on_tax_on_taxable_income_2024,
             credits=on.on_credits_2024,
             additions=on.on_additions_2024,
-        )
+        ),
+        "SK": ProvincialCalculator(
+            tax=sk.sk_tax_on_taxable_income_2024,
+            credits=sk.sk_credits_2024,
+            additions=sk.sk_additions_2024,
+        ),
+        "NS": ProvincialCalculator(
+            tax=ns.ns_tax_on_taxable_income_2024,
+            credits=ns.ns_credits_2024,
+            additions=ns.ns_additions_2024,
+        ),
+        "NB": ProvincialCalculator(
+            tax=nb.nb_tax_on_taxable_income_2024,
+            credits=nb.nb_credits_2024,
+            additions=nb.nb_additions_2024,
+        ),
+        "NL": ProvincialCalculator(
+            tax=nl.nl_tax_on_taxable_income_2024,
+            credits=nl.nl_credits_2024,
+            additions=nl.nl_additions_2024,
+        ),
+        "PE": ProvincialCalculator(
+            tax=pe.pe_tax_on_taxable_income_2024,
+            credits=pe.pe_credits_2024,
+            additions=pe.pe_additions_2024,
+        ),
+        "YT": ProvincialCalculator(
+            tax=yt.yt_tax_on_taxable_income_2024,
+            credits=yt.yt_credits_2024,
+            additions=yt.yt_additions_2024,
+        ),
+        "NT": ProvincialCalculator(
+            tax=nt.nt_tax_on_taxable_income_2024,
+            credits=nt.nt_credits_2024,
+            additions=nt.nt_additions_2024,
+        ),
+        "NU": ProvincialCalculator(
+            tax=nu.nu_tax_on_taxable_income_2024,
+            credits=nu.nu_credits_2024,
+            additions=nu.nu_additions_2024,
+        ),
     },
     2025: {
         "ON": ProvincialCalculator(
@@ -55,17 +94,20 @@ _PROVINCE_CALCULATORS_BY_YEAR: dict[int, dict[str, ProvincialCalculator]] = {
 }
 
 
+def _resolve_year_map(tax_year: int) -> dict[str, ProvincialCalculator]:
+    if tax_year in _PROVINCE_CALCULATORS_BY_YEAR:
+        return _PROVINCE_CALCULATORS_BY_YEAR[tax_year]
+    # Fall back to our default filing season if a future year is requested.
+    return _PROVINCE_CALCULATORS_BY_YEAR[2025]
+
+
 def get_provincial_calculator(tax_year: int, province: str | None) -> ProvincialCalculator:
+    year_map = _resolve_year_map(tax_year)
     province_code = (province or _DEFAULT_PROVINCE).upper()
-    year_map = _PROVINCE_CALCULATORS_BY_YEAR.get(tax_year)
-    if year_map is None:
-        year_map = _PROVINCE_CALCULATORS_BY_YEAR.get(2025, {})
-    calculator = year_map.get(province_code)
-    if calculator is None:
-        calculator = year_map.get(_DEFAULT_PROVINCE)
-    if calculator is None:
-        calculator = _PROVINCE_CALCULATORS_BY_YEAR[2025][_DEFAULT_PROVINCE]
-    return calculator
+    try:
+        return year_map[province_code]
+    except KeyError as exc:
+        raise KeyError(f"No provincial calculator configured for {province_code} in {tax_year}") from exc
 
 
 def supported_provinces(tax_year: int) -> Mapping[str, ProvincialCalculator]:
