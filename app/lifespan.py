@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncContextManager
-
 import httpx
 from fastapi import FastAPI
 
@@ -41,7 +41,7 @@ def _register_reportlab_fonts(logger: logging.Logger) -> list[str]:
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-    except Exception as exc:  # pragma: no cover - reportlab should be present but guard regardless
+    except Exception as exc:  # pragma: no cover
         logger.warning("ReportLab unavailable, cannot register fonts: %s", exc)
         return registered_now
 
@@ -58,7 +58,7 @@ def _register_reportlab_fonts(logger: logging.Logger) -> list[str]:
             pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
             _REGISTERED_FONTS.add(font_name)
             registered_now.append(font_name)
-        except Exception as exc:  # pragma: no cover - defensive logging
+        except Exception as exc:  # pragma: no cover
             logger.warning("Failed to register ReportLab font %s: %s", font_path, exc)
     return registered_now
 
@@ -84,7 +84,7 @@ async def _invoke_hook(hook: Hook | None, app: FastAPI) -> None:
         result = hook(app)
         if inspect.isawaitable(result):
             await result  # type: ignore[func-returns-value]
-    except Exception:  # pragma: no cover - hooks are user provided
+    except Exception:  # pragma: no cover
         logging.getLogger("tax_app").exception("Application lifecycle hook failed")
 
 
@@ -97,13 +97,19 @@ def build_application_lifespan(
 ) -> Callable[[FastAPI], AsyncContextManager[None]]:
     base_logger = logging.getLogger("tax_app")
 
+    # Hard-require python-multipart for form parsing (unit test asserts RuntimeError)
+    try:
+        importlib.import_module("multipart")
+    except ImportError as exc:  # pragma: no cover - covered by dedicated unit test
+        raise RuntimeError("Install python-multipart to enable form parsing") from exc
+
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings = get_settings()
         logger = base_logger.getChild(app_label)
         http_client = httpx.AsyncClient(timeout=http_timeout)
         schema_cache = _load_cra_schema_cache(logger)
-        schema_versions = {name: hashlib.sha256(payload.encode('utf-8')).hexdigest()[:12] for name, payload in schema_cache.items()}
+        schema_versions = {name: hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12] for name, payload in schema_cache.items()}
         registered_fonts = _register_reportlab_fonts(logger)
         telemetry_handler = _open_telemetry_sink(logger, app_label)
 
@@ -134,12 +140,25 @@ def build_application_lifespan(
             await _invoke_hook(shutdown_hook, app)
             try:
                 await http_client.aclose()
-            except Exception as exc:  # pragma: no cover - defensive logging
+            except Exception as exc:  # pragma: no cover
                 logger.warning("Failed to close shared httpx client: %s", exc)
             if telemetry_handler is not None:
                 logger.removeHandler(telemetry_handler)
                 telemetry_handler.close()
-            for attr in ("settings", "http_client", "cra_schema_cache", "schema_versions", "reportlab_fonts", "telemetry_handler", "artifact_root", "daily_summary_root", "submission_digests", "summary_index", "last_sbmt_ref_id", "app_label"):
+            for attr in (
+                "settings",
+                "http_client",
+                "cra_schema_cache",
+                "schema_versions",
+                "reportlab_fonts",
+                "telemetry_handler",
+                "artifact_root",
+                "daily_summary_root",
+                "submission_digests",
+                "summary_index",
+                "last_sbmt_ref_id",
+                "app_label",
+            ):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)
             logger.info("Shutdown complete")
