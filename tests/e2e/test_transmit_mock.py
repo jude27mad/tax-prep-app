@@ -14,6 +14,7 @@ def _prime_state():
     app.state.settings = Settings(
         feature_efile_xml=True,
         feature_legacy_efile=False,
+        feature_2025_transmit=False,
         efile_window_open=True,
         efile_environment="CERT",
         endpoint_cert="http://localhost:9999",
@@ -23,6 +24,8 @@ def _prime_state():
         artifact_root=str(Path("tests/.tmp_artifacts")),
         daily_summary_root=str(Path("tests/.tmp_summaries")),
     )
+    app.state.submission_digests = set()
+    app.state.summary_index = {}
     schema_cache = {
         schema_path.name: schema_path.read_text()
         for schema_path in Path("app/schemas").glob("*.xsd")

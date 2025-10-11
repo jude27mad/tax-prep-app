@@ -1,0 +1,1156 @@
+[
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Toronto",
+      "province": "ON",
+      "postal_code": "M1M1M1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "62000.00",
+        "cpp_contrib": "3100.00",
+        "ei_premiums": "890.00",
+        "pensionable_earnings": "62000.00",
+        "insurable_earnings": "62000.00",
+        "tax_deducted": "9300.00"
+      },
+      {
+        "employment_income": "18000.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "18000.00",
+        "insurable_earnings": "18000.00",
+        "tax_deducted": "2100.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "1200.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "150.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "300.00",
+        "self_employment_commissions": null,
+        "research_grants": "220.00",
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "45.50",
+        "eligible_dividends": "12.34",
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "25.00",
+        "foreign_tax_withheld": "3.75"
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": "18.25",
+        "capital_gains": "90.00",
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "1000.00",
+        "issuer": "Sample Bank",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      },
+      {
+        "contribution_amount": "500.00",
+        "issuer": "Sample Bank",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": "2000.00",
+      "medical_expenses": "450.00",
+      "charitable_donations": "250.00",
+      "student_loan_interest": "125.00"
+    },
+    "rrsp_contrib": "650.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "ON",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Vancouver",
+      "province": "BC",
+      "postal_code": "V5K0A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "54000.00",
+        "cpp_contrib": "2890.00",
+        "ei_premiums": "860.00",
+        "pensionable_earnings": null,
+        "insurable_earnings": null,
+        "tax_deducted": "7800.00"
+      },
+      {
+        "employment_income": "22000.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "22000.00",
+        "insurable_earnings": null,
+        "tax_deducted": "3200.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "950.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "100.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "525.00",
+        "self_employment_commissions": "300.00",
+        "research_grants": null,
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "75.00",
+        "eligible_dividends": null,
+        "other_dividends": "40.00",
+        "capital_gains": null,
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "120.00",
+        "foreign_tax_withheld": "18.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "1500.00",
+        "issuer": "Coastal Credit Union",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "650.00",
+      "charitable_donations": "400.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "700.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "BC",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Calgary",
+      "province": "AB",
+      "postal_code": "T2P1J9",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "68000.00",
+        "cpp_contrib": "3100.00",
+        "ei_premiums": "910.00",
+        "pensionable_earnings": null,
+        "insurable_earnings": null,
+        "tax_deducted": "9800.00"
+      },
+      {
+        "employment_income": "24000.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "24000.00",
+        "insurable_earnings": null,
+        "tax_deducted": "3600.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "1500.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "200.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": null,
+        "self_employment_commissions": "420.00",
+        "research_grants": "350.00",
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": null,
+        "eligible_dividends": "80.00",
+        "other_dividends": null,
+        "capital_gains": "140.00",
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "210.00",
+        "foreign_tax_withheld": "31.50"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "1250.00",
+        "issuer": "Prairie Wealth",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      },
+      {
+        "contribution_amount": "900.00",
+        "issuer": "Prairie Wealth",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": "1800.00",
+      "medical_expenses": null,
+      "charitable_donations": null,
+      "student_loan_interest": "210.00"
+    },
+    "rrsp_contrib": "800.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "AB",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Winnipeg",
+      "province": "MB",
+      "postal_code": "R3C4T3",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "51000.00",
+        "cpp_contrib": "2860.00",
+        "ei_premiums": "860.00",
+        "pensionable_earnings": null,
+        "insurable_earnings": null,
+        "tax_deducted": "7200.00"
+      },
+      {
+        "employment_income": "20500.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": null,
+        "insurable_earnings": null,
+        "tax_deducted": "2950.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "800.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": null
+      },
+      {
+        "pension_income": null,
+        "other_income": "610.00",
+        "self_employment_commissions": "275.00",
+        "research_grants": null,
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "55.00",
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": "60.00",
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "95.00",
+        "foreign_tax_withheld": "12.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "800.00",
+        "issuer": "Red River Savings",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "375.00",
+      "charitable_donations": "310.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "500.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "MB",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Saskatoon",
+      "province": "SK",
+      "postal_code": "S7K1A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "56000.00",
+        "cpp_contrib": "3000.00",
+        "ei_premiums": "860.00",
+        "pensionable_earnings": "56000.00",
+        "insurable_earnings": "56000.00",
+        "tax_deducted": "7800.00"
+      },
+      {
+        "employment_income": "21000.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "21000.00",
+        "insurable_earnings": "21000.00",
+        "tax_deducted": "2900.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "900.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "110.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "480.00",
+        "self_employment_commissions": null,
+        "research_grants": "180.00",
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "65.00",
+        "eligible_dividends": "18.00",
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "105.00",
+        "foreign_tax_withheld": "15.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "950.00",
+        "issuer": "Prairie Credit Union",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "420.00",
+      "charitable_donations": "280.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "520.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "SK",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Halifax",
+      "province": "NS",
+      "postal_code": "B3J1A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "53000.00",
+        "cpp_contrib": "2950.00",
+        "ei_premiums": "850.00",
+        "pensionable_earnings": "53000.00",
+        "insurable_earnings": "53000.00",
+        "tax_deducted": "7600.00"
+      },
+      {
+        "employment_income": "19500.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "19500.00",
+        "insurable_earnings": "19500.00",
+        "tax_deducted": "2600.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "875.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "95.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "440.00",
+        "self_employment_commissions": "240.00",
+        "research_grants": null,
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "58.00",
+        "eligible_dividends": null,
+        "other_dividends": "32.00",
+        "capital_gains": null,
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "90.00",
+        "foreign_tax_withheld": "13.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "880.00",
+        "issuer": "Harbour Bank",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "360.00",
+      "charitable_donations": "295.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "480.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "NS",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Fredericton",
+      "province": "NB",
+      "postal_code": "E3B1A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "54500.00",
+        "cpp_contrib": "2975.00",
+        "ei_premiums": "840.00",
+        "pensionable_earnings": "54500.00",
+        "insurable_earnings": "54500.00",
+        "tax_deducted": "7900.00"
+      },
+      {
+        "employment_income": "20500.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "20500.00",
+        "insurable_earnings": "20500.00",
+        "tax_deducted": "2750.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "920.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "105.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "410.00",
+        "self_employment_commissions": null,
+        "research_grants": "210.00",
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "62.00",
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": "85.00",
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "115.00",
+        "foreign_tax_withheld": "16.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "910.00",
+        "issuer": "Maritime Savings",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "375.00",
+      "charitable_donations": "265.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "505.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "NB",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "St. John's",
+      "province": "NL",
+      "postal_code": "A1B2C3",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "57500.00",
+        "cpp_contrib": "3025.00",
+        "ei_premiums": "845.00",
+        "pensionable_earnings": "57500.00",
+        "insurable_earnings": "57500.00",
+        "tax_deducted": "8200.00"
+      },
+      {
+        "employment_income": "21500.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "21500.00",
+        "insurable_earnings": "21500.00",
+        "tax_deducted": "3100.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "980.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "120.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "470.00",
+        "self_employment_commissions": "255.00",
+        "research_grants": null,
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "70.00",
+        "eligible_dividends": null,
+        "other_dividends": "34.00",
+        "capital_gains": null,
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "125.00",
+        "foreign_tax_withheld": "18.50"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "990.00",
+        "issuer": "Atlantic Trust",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "390.00",
+      "charitable_donations": "305.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "540.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "NL",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Charlottetown",
+      "province": "PE",
+      "postal_code": "C1A1A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "50500.00",
+        "cpp_contrib": "2880.00",
+        "ei_premiums": "820.00",
+        "pensionable_earnings": "50500.00",
+        "insurable_earnings": "50500.00",
+        "tax_deducted": "7100.00"
+      },
+      {
+        "employment_income": "18500.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "18500.00",
+        "insurable_earnings": "18500.00",
+        "tax_deducted": "2450.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "810.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "90.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "395.00",
+        "self_employment_commissions": null,
+        "research_grants": "205.00",
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "55.00",
+        "eligible_dividends": "16.50",
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "88.00",
+        "foreign_tax_withheld": "12.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "840.00",
+        "issuer": "Island Credit",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "345.00",
+      "charitable_donations": "255.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "455.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "PE",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Whitehorse",
+      "province": "YT",
+      "postal_code": "Y1A1A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "59000.00",
+        "cpp_contrib": "3050.00",
+        "ei_premiums": "870.00",
+        "pensionable_earnings": "59000.00",
+        "insurable_earnings": "59000.00",
+        "tax_deducted": "8300.00"
+      },
+      {
+        "employment_income": "22500.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "22500.00",
+        "insurable_earnings": "22500.00",
+        "tax_deducted": "3150.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "1025.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "125.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "505.00",
+        "self_employment_commissions": "285.00",
+        "research_grants": null,
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "78.00",
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": "95.00",
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "132.00",
+        "foreign_tax_withheld": "19.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "1040.00",
+        "issuer": "Yukon Savings",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "410.00",
+      "charitable_donations": "320.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "560.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "YT",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Yellowknife",
+      "province": "NT",
+      "postal_code": "X1A1A1",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "58500.00",
+        "cpp_contrib": "3035.00",
+        "ei_premiums": "865.00",
+        "pensionable_earnings": "58500.00",
+        "insurable_earnings": "58500.00",
+        "tax_deducted": "8250.00"
+      },
+      {
+        "employment_income": "21800.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "21800.00",
+        "insurable_earnings": "21800.00",
+        "tax_deducted": "3050.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "995.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "118.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "490.00",
+        "self_employment_commissions": null,
+        "research_grants": "215.00",
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "74.00",
+        "eligible_dividends": null,
+        "other_dividends": "36.00",
+        "capital_gains": null,
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "128.00",
+        "foreign_tax_withheld": "18.00"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "1010.00",
+        "issuer": "Northern Bank",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "405.00",
+      "charitable_donations": "315.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "555.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "NT",
+    "tax_year": 2025
+  },
+  {
+    "taxpayer": {
+      "sin": "046454286",
+      "first_name": "Test",
+      "last_name": "User",
+      "dob": "1990-01-01",
+      "address_line1": "1 Main St",
+      "city": "Iqaluit",
+      "province": "NU",
+      "postal_code": "X0A1H0",
+      "residency_status": "resident"
+    },
+    "household": {
+      "marital_status": "single",
+      "spouse_sin": null,
+      "dependants": []
+    },
+    "slips_t4": [
+      {
+        "employment_income": "60000.00",
+        "cpp_contrib": "3080.00",
+        "ei_premiums": "880.00",
+        "pensionable_earnings": "60000.00",
+        "insurable_earnings": "60000.00",
+        "tax_deducted": "8400.00"
+      },
+      {
+        "employment_income": "23000.00",
+        "cpp_contrib": null,
+        "ei_premiums": null,
+        "pensionable_earnings": "23000.00",
+        "insurable_earnings": "23000.00",
+        "tax_deducted": "3200.00"
+      }
+    ],
+    "slips_t4a": [
+      {
+        "pension_income": "1035.00",
+        "other_income": null,
+        "self_employment_commissions": null,
+        "research_grants": null,
+        "tax_deducted": "130.00"
+      },
+      {
+        "pension_income": null,
+        "other_income": "520.00",
+        "self_employment_commissions": "295.00",
+        "research_grants": null,
+        "tax_deducted": null
+      }
+    ],
+    "slips_t5": [
+      {
+        "interest_income": "80.00",
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": "105.00",
+        "foreign_income": null,
+        "foreign_tax_withheld": null
+      },
+      {
+        "interest_income": null,
+        "eligible_dividends": null,
+        "other_dividends": null,
+        "capital_gains": null,
+        "foreign_income": "135.00",
+        "foreign_tax_withheld": "19.50"
+      }
+    ],
+    "tuition_slips": [],
+    "rrsp_receipts": [
+      {
+        "contribution_amount": "1080.00",
+        "issuer": "Arctic Trust",
+        "receipt_type": "official",
+        "period_start": null,
+        "period_end": null
+      }
+    ],
+    "deductions": {
+      "tuition_fees": null,
+      "medical_expenses": "430.00",
+      "charitable_donations": "330.00",
+      "student_loan_interest": null
+    },
+    "rrsp_contrib": "575.00",
+    "tuition_claim": "0.00",
+    "tuition_transfer_to_spouse": "0.00",
+    "t183_signed_ts": "2025-02-15T09:00:00",
+    "t183_ip_hash": "hash-ip",
+    "t183_user_agent_hash": "hash-ua",
+    "t183_pdf_path": "/tmp/t183.pdf",
+    "province": "NU",
+    "tax_year": 2025
+  }
+]

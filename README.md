@@ -139,7 +139,7 @@ Key environment variables (defaults shown):
 | `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs | `900000`, `900001` |
 | `EFILE_ENDPOINT_CERT` / `EFILE_ENDPOINT_PROD` | CRA endpoints | `http://127.0.0.1:9000`, `https://prod-placeholder` |
 | `SOFTWARE_VERSION` | Application version string | `0.0.3` |
-| `T183_CRYPTO_KEY` | Optional Fernet key for encrypted T183/T2183 retention | unset |
+| `T183_CRYPTO_KEY` | Fernet key for encrypted T183/T2183 retention (required) | unset |
 | `RETENTION_T2183_ENABLED` | Toggle T2183 retention | `false` |
 
 Set variables in the terminal before launching the preparer API, for example:
@@ -158,7 +158,7 @@ The `/ui` routes rely on Starlette's multipart form parser, which now requires
 the `python-multipart` package at runtime. Refresh environments with `pip
 install -r requirements.txt` (or `pip install python-multipart`) before running
 the UI server and validate with `pip show python-multipart` or `python -c
-"import multipart"`. Additional rollout guidance lives in the [migration
+"import python_multipart"`. Additional rollout guidance lives in the [migration
 notes](docs/efile_suitability.md#migration).
 
 ## CRA tooling highlights

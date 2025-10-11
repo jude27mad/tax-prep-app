@@ -15,6 +15,7 @@ def _configure_settings(tmp_path) -> Settings:
     settings = Settings(
         feature_efile_xml=True,
         feature_legacy_efile=True,
+        feature_2025_transmit=False,
         efile_window_open=True,
         artifact_root=str(artifacts),
         daily_summary_root=str(summaries),
@@ -43,6 +44,18 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
         file_path = artifact_root / f"{sbmt_ref_id_value}_{digest_value}_envelope.xml"
         file_path.write_text("<xml />", encoding="utf-8")
 
+        envelope_xml = (
+            "<T619Transmission xmlns=\"http://www.cra-arc.gc.ca/xmlns/efile/t619/1.0\">"
+            f"<sbmt_ref_id>{sbmt_ref_id_value}</sbmt_ref_id>"
+            "<Environment>CERT</Environment>"
+            "<SoftwareId>TEST-SW</SoftwareId>"
+            "<SoftwareVersion>1.0.0</SoftwareVersion>"
+            "<TransmitterId>123456</TransmitterId>"
+            "<RepID>RP1234567</RepID>"
+            "<Payload>DATA</Payload>"
+            "</T619Transmission>"
+        )
+
         class DummyEnvelope:  # noqa: WPS430
             software_id = "TEST-SW"
             software_ver = "1.0.0"
@@ -51,7 +64,7 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
 
         return SimpleNamespace(
             envelope=DummyEnvelope(),
-            package=SimpleNamespace(),
+            package=SimpleNamespace(envelope_xml=envelope_xml),
             digest=digest_value,
             sbmt_ref_id=sbmt_ref_id_value,
             xml_bytes=b"<xml />",
@@ -67,7 +80,7 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
 
     client = TestClient(api_app)
 
-    payload = make_min_input().model_dump(mode="json")
+    payload = make_min_input(tax_year=2024).model_dump(mode="json")
 
     prepare_response = client.post("/prepare", json=payload)
     assert prepare_response.status_code == 200
@@ -103,6 +116,7 @@ def test_prepare_efile_window_closed(tmp_path):
     settings = Settings(
         feature_efile_xml=True,
         feature_legacy_efile=False,
+        feature_2025_transmit=False,
         efile_window_open=False,
         artifact_root=str(tmp_path / "artifacts"),
         daily_summary_root=str(tmp_path / "summaries"),
@@ -116,13 +130,13 @@ def test_prepare_efile_window_closed(tmp_path):
     api_app.state.summary_index = {}
 
     client = TestClient(api_app)
-    payload = make_min_input().model_dump(mode="json")
+    payload = make_min_input(tax_year=2024).model_dump(mode="json")
     response = client.post("/prepare/efile", json=payload)
     assert response.status_code == 503
-    assert response.json()["detail"] == "CRA EFILE window not yet open for 2025"
+    assert response.json()["detail"] == "CRA EFILE window not yet open for 2024"
 
 
-def test_prepare_efile_rejects_wrong_year(tmp_path):
+def test_prepare_efile_blocks_2025_without_flag(tmp_path):
     settings = _configure_settings(tmp_path)
     api_app.state.settings = settings
     api_app.state.artifact_root = Path(settings.artifact_root)
@@ -131,7 +145,10 @@ def test_prepare_efile_rejects_wrong_year(tmp_path):
     api_app.state.summary_index = {}
 
     client = TestClient(api_app)
-    payload = make_min_input(tax_year=2024).model_dump(mode="json")
+    payload = make_min_input(tax_year=2025).model_dump(mode="json")
     response = client.post("/prepare/efile", json=payload)
-    assert response.status_code == 400
-    assert response.json()["detail"] == "EFILE XML is only available for 2025 filings"
+    assert response.status_code == 403
+    assert (
+        response.json()["detail"]
+        == "EFILE transmission for tax year 2025 is not yet available. Prepare estimates only."
+    )

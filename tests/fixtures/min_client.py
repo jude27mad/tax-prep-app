@@ -653,6 +653,8 @@ def make_min_input(
   tax_year: int = 2025,
   include_examples: bool = False,
   province: str = "ON",
+  transmitter_account_mm: str | None = None,
+  rep_id: str | None = "RP1234567",
 ) -> ReturnInput:
   province_code, fixture = _fixture_for_province(province)
   tp = Taxpayer(
@@ -696,6 +698,8 @@ def make_min_input(
     t183_ip_hash="hash-ip",
     t183_user_agent_hash="hash-ua",
     t183_pdf_path="/tmp/t183.pdf",
+    transmitter_account_mm=transmitter_account_mm,
+    rep_id=rep_id,
   )
 
 

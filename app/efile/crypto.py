@@ -33,14 +33,14 @@ def _cipher() -> Optional[Fernet]:
 def encrypt(data: bytes) -> bytes:
     cipher = _cipher()
     if cipher is None:
-        return data
+        raise EncryptionError("T183 crypto key is not configured")
     return cipher.encrypt(data)
 
 
 def decrypt(data: bytes) -> bytes:
     cipher = _cipher()
     if cipher is None:
-        return data
+        raise EncryptionError("T183 crypto key is not configured")
     try:
         return cipher.decrypt(data)
     except InvalidToken as exc:  # pragma: no cover - indicates configuration drift
