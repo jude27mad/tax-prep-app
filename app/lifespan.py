@@ -99,9 +99,11 @@ def build_application_lifespan(
 
     # Hard-require python-multipart for form parsing (unit test asserts RuntimeError)
     try:
-        importlib.import_module("multipart")
+        importlib.import_module("python_multipart")
     except ImportError as exc:  # pragma: no cover - covered by dedicated unit test
-        raise RuntimeError("Install python-multipart to enable form parsing") from exc
+        raise RuntimeError(
+            "python-multipart is required for form submissions. Install it with 'pip install python-multipart'."
+        ) from exc
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncIterator[None]:

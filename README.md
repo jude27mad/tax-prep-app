@@ -158,7 +158,7 @@ The `/ui` routes rely on Starlette's multipart form parser, which now requires
 the `python-multipart` package at runtime. Refresh environments with `pip
 install -r requirements.txt` (or `pip install python-multipart`) before running
 the UI server and validate with `pip show python-multipart` or `python -c
-"import multipart"`. Additional rollout guidance lives in the [migration
+"import python_multipart"`. Additional rollout guidance lives in the [migration
 notes](docs/efile_suitability.md#migration).
 
 ## CRA tooling highlights

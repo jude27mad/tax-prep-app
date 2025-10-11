@@ -38,7 +38,7 @@ dependency when refreshing virtual environments or container images.
 
 1. **Install the package** – run `pip install python-multipart` (or refresh from
    `requirements.txt`) in every runtime that serves the UI routes.
-2. **Validate availability** – execute `python -c "import multipart; print(multipart.__version__)"`
+2. **Validate availability** – execute `python -c "import python_multipart; print(python_multipart.__version__)"`
    or `pip show python-multipart` after deployment. Either command confirms the
    interpreter can import the parser.
 3. **CI / build pipelines** – add the same validation step to Dockerfiles or CI
