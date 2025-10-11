@@ -2,7 +2,38 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
+from app.core.provinces._progressive import (
+    basic_personal_credit,
+    calculate_progressive_tax,
+)
+
 D = Decimal
+
+
+PE_BRACKETS_2024 = [
+    (D("0"), D("32656"), D("0.0965")),
+    (D("32656"), D("64313"), D("0.1363")),
+    (D("64313"), D("105000"), D("0.1665")),
+    (D("105000"), D("140000"), D("0.1800")),
+    (D("140000"), None, D("0.1875")),
+]
+
+PE_NRTC_RATE_2024 = D("0.0965")
+PE_BPA_2024 = D("13500")
+
+
+def pe_tax_on_taxable_income_2024(taxable_income: D) -> D:
+    return calculate_progressive_tax(PE_BRACKETS_2024, taxable_income)
+
+
+def pe_credits_2024() -> D:
+    return basic_personal_credit(PE_BPA_2024, PE_NRTC_RATE_2024)
+
+
+def pe_additions_2024(
+    taxable_income: D, provincial_tax: D, provincial_credits: D
+) -> dict[str, D]:
+    return {}
 
 
 PE_BRACKETS_2025 = [

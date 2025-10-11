@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from types import ModuleType
 from typing import Callable, Mapping
 
 from app.core.provinces import ab, bc, mb, nb, nl, ns, nt, nu, on, pe, sk, yt
+from app.core.provinces.dispatch_2024 import CALC_2024 as MODULES_2024
 
 D = Decimal
 
@@ -22,13 +24,20 @@ class ProvincialCalculator:
 
 _DEFAULT_PROVINCE = "ON"
 
+def _calculator_from_module(module: ModuleType, year: int) -> ProvincialCalculator:
+    name = module.__name__.rsplit(".", 1)[-1]
+    prefix = name.lower()
+    return ProvincialCalculator(
+        tax=getattr(module, f"{prefix}_tax_on_taxable_income_{year}"),
+        credits=getattr(module, f"{prefix}_credits_{year}"),
+        additions=getattr(module, f"{prefix}_additions_{year}"),
+    )
+
+
 _PROVINCE_CALCULATORS_BY_YEAR: dict[int, dict[str, ProvincialCalculator]] = {
     2024: {
-        "ON": ProvincialCalculator(
-            tax=on.on_tax_on_taxable_income_2024,
-            credits=on.on_credits_2024,
-            additions=on.on_additions_2024,
-        )
+        code: _calculator_from_module(module, 2024)
+        for code, module in MODULES_2024.items()
     },
     2025: {
         "ON": ProvincialCalculator(
@@ -96,16 +105,29 @@ _PROVINCE_CALCULATORS_BY_YEAR: dict[int, dict[str, ProvincialCalculator]] = {
 
 
 def get_provincial_calculator(tax_year: int, province: str | None) -> ProvincialCalculator:
-    province_code = (province or _DEFAULT_PROVINCE).upper()
     year_map = _PROVINCE_CALCULATORS_BY_YEAR.get(tax_year)
-    if year_map is None:
+    resolved_year = tax_year
+    if not year_map:
+        resolved_year = 2025
         year_map = _PROVINCE_CALCULATORS_BY_YEAR.get(2025, {})
-    calculator = year_map.get(province_code)
-    if calculator is None:
-        calculator = year_map.get(_DEFAULT_PROVINCE)
-    if calculator is None:
-        calculator = _PROVINCE_CALCULATORS_BY_YEAR[2025][_DEFAULT_PROVINCE]
-    return calculator
+    if not year_map:
+        raise KeyError(f"No provincial calculators available for tax year {tax_year}")
+
+    if province:
+        province_code = province.upper()
+    else:
+        province_code = _DEFAULT_PROVINCE
+
+    try:
+        return year_map[province_code]
+    except KeyError as exc:
+        if not province:
+            raise KeyError(
+                f"Default province '{_DEFAULT_PROVINCE}' missing for tax year {resolved_year}"
+            ) from exc
+        raise KeyError(
+            f"Unsupported province code '{province_code}' for tax year {resolved_year}"
+        ) from exc
 
 
 def supported_provinces(tax_year: int) -> Mapping[str, ProvincialCalculator]:
