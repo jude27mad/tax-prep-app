@@ -124,6 +124,11 @@ async def prepare_efile(req: TransmitRequest):
     if not settings.feature_efile_xml:
         raise HTTPException(status_code=503, detail="EFILE XML feature flag disabled")
 
+    if req.tax_year != 2025:
+        raise HTTPException(status_code=400, detail="EFILE XML is only available for 2025 filings")
+    if not settings.efile_window_open:
+        raise HTTPException(status_code=503, detail="CRA EFILE window not yet open for 2025")
+
     issues = validate_return_input(req)
     if issues:
         raise HTTPException(status_code=400, detail=issues)

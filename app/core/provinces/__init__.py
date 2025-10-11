@@ -90,6 +90,46 @@ _PROVINCE_CALCULATORS_BY_YEAR: dict[int, dict[str, ProvincialCalculator]] = {
             credits=mb.mb_credits_2025,
             additions=mb.mb_additions_2025,
         ),
+        "SK": ProvincialCalculator(
+            tax=sk.sk_tax_on_taxable_income_2025,
+            credits=sk.sk_credits_2025,
+            additions=sk.sk_additions_2025,
+        ),
+        "NS": ProvincialCalculator(
+            tax=ns.ns_tax_on_taxable_income_2025,
+            credits=ns.ns_credits_2025,
+            additions=ns.ns_additions_2025,
+        ),
+        "NB": ProvincialCalculator(
+            tax=nb.nb_tax_on_taxable_income_2025,
+            credits=nb.nb_credits_2025,
+            additions=nb.nb_additions_2025,
+        ),
+        "NL": ProvincialCalculator(
+            tax=nl.nl_tax_on_taxable_income_2025,
+            credits=nl.nl_credits_2025,
+            additions=nl.nl_additions_2025,
+        ),
+        "PE": ProvincialCalculator(
+            tax=pe.pe_tax_on_taxable_income_2025,
+            credits=pe.pe_credits_2025,
+            additions=pe.pe_additions_2025,
+        ),
+        "YT": ProvincialCalculator(
+            tax=yt.yt_tax_on_taxable_income_2025,
+            credits=yt.yt_credits_2025,
+            additions=yt.yt_additions_2025,
+        ),
+        "NT": ProvincialCalculator(
+            tax=nt.nt_tax_on_taxable_income_2025,
+            credits=nt.nt_credits_2025,
+            additions=nt.nt_additions_2025,
+        ),
+        "NU": ProvincialCalculator(
+            tax=nu.nu_tax_on_taxable_income_2025,
+            credits=nu.nu_credits_2025,
+            additions=nu.nu_additions_2025,
+        ),
     },
 }
 
