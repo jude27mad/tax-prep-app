@@ -15,12 +15,12 @@ from app.efile.service import (
 from app.efile.transmit import CircuitOpenError, EfileClient
 from ..efile.records import EfileEnvelope, build_records
 from ..core.models import ReturnCalc, ReturnInput
-from ..core.tax_years._2024_alias import compute_return as compute_return_2024
-from ..core.tax_years._2025_alias import compute_return as compute_return_2025
+from ..core.tax_years import SUPPORTED_YEARS, compute_for_year as compute_return_for_year
 from ..core.validate.pre_submit import validate_return_input
 from ..efile.serialize import serialize
 from ..printout.t1_render import render_t1_pdf
 from ..ui import router as ui_router
+from ..efile.gating import transmit_restriction
 
 DEFAULT_TAX_YEAR = 2025
 logger = logging.getLogger("tax_app")
@@ -74,11 +74,10 @@ class CertRunnerResponse(BaseModel):
 
 
 def _compute_for_year(req: ReturnInput) -> ReturnCalc:
-    if req.tax_year == 2024:
-        return compute_return_2024(req)
-    if req.tax_year == 2025:
-        return compute_return_2025(req)
-    raise HTTPException(status_code=400, detail=f"Unsupported tax year {req.tax_year}")
+    try:
+        return compute_return_for_year(req)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/health")
@@ -124,10 +123,15 @@ async def prepare_efile(req: TransmitRequest):
     if not settings.feature_efile_xml:
         raise HTTPException(status_code=503, detail="EFILE XML feature flag disabled")
 
-    if req.tax_year != 2025:
-        raise HTTPException(status_code=400, detail="EFILE XML is only available for 2025 filings")
+    restriction = transmit_restriction(req.tax_year, settings=settings)
+    if restriction:
+        status = 400 if req.tax_year not in SUPPORTED_YEARS else 403
+        raise HTTPException(status_code=status, detail=restriction)
     if not settings.efile_window_open:
-        raise HTTPException(status_code=503, detail="CRA EFILE window not yet open for 2025")
+        raise HTTPException(
+            status_code=503,
+            detail=f"CRA EFILE window not yet open for {req.tax_year}",
+        )
 
     issues = validate_return_input(req)
     if issues:
