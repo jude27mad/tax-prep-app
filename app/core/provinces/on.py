@@ -1,6 +1,11 @@
 from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 
+from app.core.provinces._progressive import (
+    basic_personal_credit,
+    calculate_progressive_tax,
+)
+
 D = Decimal
 
 # ------------------------------ 2024 ---------------------------------
@@ -31,21 +36,11 @@ OHP_STEPS_2024 = [
 
 
 def on_tax_on_taxable_income_2024(taxable_income: D) -> D:
-    ti = max(D("0"), taxable_income)
-    tax = D("0")
-    for lo, hi, rate in ON_BRACKETS_2024:
-        upper = hi if hi is not None else ti
-        if ti > lo:
-            span = min(ti, upper) - lo
-            if span > 0:
-                tax += span * rate
-        if hi is not None and ti <= hi:
-            break
-    return tax.quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return calculate_progressive_tax(ON_BRACKETS_2024, taxable_income)
 
 
 def on_credits_2024() -> D:
-    return (ON_BPA_2024 * ON_NRTC_RATE_2024).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return basic_personal_credit(ON_BPA_2024, ON_NRTC_RATE_2024)
 
 
 def on_surtax_2024(ont_tax_before_surtax: D) -> D:
@@ -95,21 +90,11 @@ SURTAX_T2_2025 = (D("7307"), D("0.36"))
 
 
 def on_tax_on_taxable_income_2025(taxable_income: D) -> D:
-    ti = max(D("0"), taxable_income)
-    tax = D("0")
-    for lo, hi, rate in ON_BRACKETS_2025:
-        upper = hi if hi is not None else ti
-        if ti > lo:
-            span = min(ti, upper) - lo
-            if span > 0:
-                tax += span * rate
-        if hi is not None and ti <= hi:
-            break
-    return tax.quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return calculate_progressive_tax(ON_BRACKETS_2025, taxable_income)
 
 
 def on_credits_2025() -> D:
-    return (ON_BPA_2025 * ON_NRTC_RATE_2025).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return basic_personal_credit(ON_BPA_2025, ON_NRTC_RATE_2025)
 
 
 def on_surtax_2025(ont_tax_before_surtax: D) -> D:

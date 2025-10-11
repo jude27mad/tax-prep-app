@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
+
+from app.core.provinces._progressive import (
+    basic_personal_credit,
+    calculate_progressive_tax,
+)
 
 D = Decimal
 
@@ -18,21 +23,11 @@ NS_BPA_2024 = D("11481")
 
 
 def ns_tax_on_taxable_income_2024(taxable_income: D) -> D:
-    ti = max(D("0"), taxable_income)
-    tax = D("0")
-    for lo, hi, rate in NS_BRACKETS_2024:
-        upper = hi if hi is not None else ti
-        if ti > lo:
-            span = min(ti, upper) - lo
-            if span > 0:
-                tax += span * rate
-        if hi is not None and ti <= hi:
-            break
-    return tax.quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return calculate_progressive_tax(NS_BRACKETS_2024, taxable_income)
 
 
 def ns_credits_2024() -> D:
-    return (NS_BPA_2024 * NS_NRTC_RATE_2024).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return basic_personal_credit(NS_BPA_2024, NS_NRTC_RATE_2024)
 
 
 def ns_additions_2024(

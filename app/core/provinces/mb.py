@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
+
+from app.core.provinces._progressive import (
+    basic_personal_credit,
+    calculate_progressive_tax,
+)
 
 D = Decimal
 
@@ -16,21 +21,11 @@ MB_BPA_2025 = D("15780")
 
 
 def mb_tax_on_taxable_income_2025(taxable_income: D) -> D:
-    ti = max(D("0"), taxable_income)
-    tax = D("0")
-    for lo, hi, rate in MB_BRACKETS_2025:
-        upper = hi if hi is not None else ti
-        if ti > lo:
-            span = min(ti, upper) - lo
-            if span > 0:
-                tax += span * rate
-        if hi is not None and ti <= hi:
-            break
-    return tax.quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return calculate_progressive_tax(MB_BRACKETS_2025, taxable_income)
 
 
 def mb_credits_2025() -> D:
-    return (MB_BPA_2025 * MB_NRTC_RATE_2025).quantize(D("0.01"), rounding=ROUND_HALF_UP)
+    return basic_personal_credit(MB_BPA_2025, MB_NRTC_RATE_2025)
 
 
 def mb_additions_2025(
