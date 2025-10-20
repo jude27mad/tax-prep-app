@@ -35,6 +35,7 @@ from app.wizard import (
     set_active_profile,
     slugify,
 )
+from .slip_ingest import SlipDetection, ingest_slip_uploads
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
@@ -613,6 +614,8 @@ def new_return(request: Request) -> HTMLResponse:
         "artifact_paths": [],
         "format_currency": _format_currency,
         "messages": [],
+        "slip_detections": [],
+        "slip_ingest_errors": [],
     }
     context.update(_transmit_gate_context(context["form_state"], settings))
     return TEMPLATES.TemplateResponse("return_form.html", context)
@@ -621,7 +624,45 @@ def new_return(request: Request) -> HTMLResponse:
 @router.post("/returns/prepare", response_class=HTMLResponse)
 async def prepare_return(request: Request) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    uploads = [
+        item
+        for item in form.getlist("slip_documents")
+        if isinstance(item, UploadFile) and item.filename
+    ]
+    slip_detections: list[SlipDetection]
+    slip_ingest_errors: list[str]
+    if uploads:
+        slip_detections, slip_ingest_errors = await ingest_slip_uploads(uploads)
+    else:
+        slip_detections, slip_ingest_errors = [], []
+
+    form_dict = {key: form.get(key) for key in form.keys() if key != "slip_documents"}
+
+    existing_indices: list[int] = []
+    for key in form_dict.keys():
+        if not isinstance(key, str):
+            continue
+        if not key.startswith("slips_t4-"):
+            continue
+        parts = key.split("-", 2)
+        if len(parts) < 3:
+            continue
+        if parts[1].isdigit():
+            existing_indices.append(int(parts[1]))
+    next_index = (max(existing_indices) + 1) if existing_indices else 0
+
+    for detection in slip_detections:
+        if detection.fields:
+            assigned_index = next_index
+            detection.applied = True
+            detection.applied_index = assigned_index
+            next_index += 1
+            for field, value in detection.fields.items():
+                form_dict[f"slips_t4-{assigned_index}-{field}"] = value
+        else:
+            detection.applied = False
+            detection.applied_index = None
+
     payload, field_errors, state = _parse_return_form(form_dict)
 
     issues: list[str] = []
@@ -652,6 +693,8 @@ async def prepare_return(request: Request) -> HTMLResponse:
         "prepare_ok": payload is not None and not issues,
         "artifact_paths": [],
         "format_currency": _format_currency,
+        "slip_detections": [d.as_dict() for d in slip_detections],
+        "slip_ingest_errors": slip_ingest_errors,
     }
     messages: list[str] = []
     if payload is None:

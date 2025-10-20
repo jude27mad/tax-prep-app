@@ -109,6 +109,21 @@
     .artifact-list li {
       margin-bottom: 0.35rem;
     }
+    .slip-detections {
+      margin-bottom: 1rem;
+    }
+    .slip-detections ul {
+      margin: 0.5rem 0 0 1.25rem;
+      padding: 0;
+    }
+    .slip-detections li {
+      margin-bottom: 0.35rem;
+    }
+    .slip-detection-fields {
+      margin-top: 0.35rem;
+      font-size: 0.9rem;
+      color: #1f2937;
+    }
     pre {
       background: #0f172a;
       color: #f1f5f9;
@@ -133,7 +148,7 @@
     {% if field_errors %}
       <div class="status-box warning">Some fields need attention. Fix them and try again.</div>
     {% endif %}
-    <form id="return-form" method="post" action="/ui/returns/prepare">
+    <form id="return-form" method="post" action="/ui/returns/prepare" enctype="multipart/form-data">
       <section>
         <div class="section-heading">Taxpayer details</div>
         <div class="form-grid">
@@ -223,6 +238,62 @@
 
       <section>
         <div class="section-heading">T4 slips</div>
+        {% if slip_ingest_errors %}
+          <div class="status-box warning">
+            <strong>Upload warnings</strong>
+            <ul>
+              {% for message in slip_ingest_errors %}
+                <li>{{ message }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+        {% if slip_detections %}
+          <div class="status-box success slip-detections">
+            <strong>Detected slip data</strong>
+            <ul>
+              {% for detection in slip_detections %}
+                <li>
+                  <span>{{ detection.source }}</span>
+                  {% if detection.applied %}
+                    – added as slip #{{ detection.applied_index + 1 }}
+                  {% else %}
+                    – no slip values detected
+                  {% endif %}
+                  {% if detection.warnings %}
+                    <div class="field-error" style="margin-top: 0.25rem;">
+                      {{ detection.warnings | join("; ") }}
+                    </div>
+                  {% endif %}
+                  {% if detection.fields %}
+                    <div class="slip-detection-fields">
+                      <ul>
+                        {% for key, value in detection.fields.items() %}
+                          <li>{{ key.replace('_', ' ') | title }}: {{ value }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                  {% if detection.preview %}
+                    <details style="margin-top: 0.35rem;">
+                      <summary>Preview</summary>
+                      <pre>{{ detection.preview }}</pre>
+                    </details>
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+        <div class="form-grid">
+          <label class="field" style="grid-column: 1 / -1;">
+            <span>Upload slip documents</span>
+            <input type="file" name="slip_documents" id="slip_documents" multiple accept=".pdf,.txt,.csv,.png,.jpg,.jpeg" />
+            <div class="field-help">
+              Upload CRA slips (PDF, text, basic images). Detected values for Boxes 14, 22, 16, 18, 26, and 24 will be added as new T4 slips.
+            </div>
+          </label>
+        </div>
         <div id="t4-slips">
           {% for slip in form_state.slips_t4 %}
             <div class="slip-wrapper t4-slip" data-slip-index="{{ slip.index }}">
