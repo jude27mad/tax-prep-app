@@ -5,8 +5,8 @@ from typing import Mapping
 from app.config import Settings, get_settings
 from app.core.tax_years import SUPPORTED_YEARS
 
-CRA_EFILE_INITIAL_YEARS: frozenset[int] = frozenset(range(2017, 2025))
-CRA_REFILING_YEARS: frozenset[int] = frozenset(range(2021, 2025))
+CRA_EFILE_INITIAL_YEARS: frozenset[int] = frozenset(range(2017, 2026))
+CRA_REFILING_YEARS: frozenset[int] = frozenset(range(2021, 2026))
 
 
 def _cra_active_years() -> set[int]:

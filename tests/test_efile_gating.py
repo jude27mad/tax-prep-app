@@ -2,11 +2,11 @@ from app.config import Settings
 from app.efile.gating import can_transmit
 
 
-def _settings() -> Settings:
+def _settings(*, feature_2025_transmit: bool = False) -> Settings:
     return Settings(
         feature_efile_xml=True,
         feature_legacy_efile=True,
-        feature_2025_transmit=False,
+        feature_2025_transmit=feature_2025_transmit,
         efile_window_open=True,
         endpoint_cert="http://127.0.0.1:9000",
         endpoint_prod="http://127.0.0.1:9000",
@@ -21,3 +21,8 @@ def test_can_transmit_allows_2024():
 def test_can_transmit_blocks_2025_without_feature_flag():
     settings = _settings()
     assert can_transmit(2025, settings=settings) is False
+
+
+def test_can_transmit_allows_2025_with_feature_flag():
+    settings = _settings(feature_2025_transmit=True)
+    assert can_transmit(2025, settings=settings) is True
