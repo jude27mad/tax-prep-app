@@ -45,24 +45,27 @@ IMAGE_EXTENSIONS = {
 }
 ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
 
-MAX_UPLOAD_SIZE = 8 * 1024 * 1024
+MAX_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MiB cap per upload
 PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
 
+# ----------------------------- Errors & Models -------------------------------
+
 class SlipUploadError(Exception):
-    pass
+    """Raised when an upload fails validation or ingestion."""
 
 
 class SlipJobNotFoundError(Exception):
-    pass
+    """Raised when a requested ingestion job cannot be located."""
 
 
 class SlipApplyError(Exception):
-    pass
+    """Raised when staged detections cannot be applied."""
 
 
 class SlipDetection(BaseModel):
+    """Structured payload returned to the UI for an ingested slip."""
     id: str
     slip_type: str
     original_filename: str
@@ -104,7 +107,11 @@ class ApplyDetectionsRequest(BaseModel):
     detection_ids: list[str] | None = None
 
 
+# ----------------------------- In-memory Store -------------------------------
+
 class SlipStagingStore:
+    """In-memory staging area for slip ingestion workflows."""
+
     def __init__(self) -> None:
         self._jobs: dict[str, _SlipJobRecord] = {}
         self._staged: dict[str, dict[str, SlipDetection]] = {}
@@ -142,7 +149,7 @@ class SlipStagingStore:
             async with self._lock:
                 self._jobs[job_id] = record
             raise
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover - defensive fallback
             record.status = "error"
             record.error = "Unable to process slip"
             async with self._lock:
@@ -208,6 +215,7 @@ _DEFAULT_STORE = SlipStagingStore()
 
 
 def resolve_store(app: Any | None = None) -> SlipStagingStore:
+    """Return the staging store associated with the running app instance."""
     if app is None:
         return _DEFAULT_STORE
     store = getattr(app.state, "slip_staging_store", None)
@@ -217,6 +225,8 @@ def resolve_store(app: Any | None = None) -> SlipStagingStore:
     setattr(app.state, "slip_staging_store", store)
     return store
 
+
+# ------------------------------- Core ingest ---------------------------------
 
 async def _ingest_upload(
     detection_id: str,
@@ -254,6 +264,8 @@ async def _ingest_upload(
         created_at=datetime.now(timezone.utc),
     )
 
+
+# ----------------------------- Helper functions ------------------------------
 
 def _resolve_extension(filename: str, content_type: str | None) -> str:
     extension = Path(filename).suffix.lower()
@@ -404,7 +416,15 @@ def _build_detection_fields(slip_type: str, text: str) -> dict[str, str]:
     return fields
 
 
+# --- move helper before use to avoid F821 ---
+def _keyword_pattern(keyword: str) -> str:
+    """Allow flexible whitespace matching for labels like 'box 14'."""
+    escaped = re.escape(keyword)
+    return escaped.replace("\\ ", r"\s+")
+
+
 def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
+    """Find the first numeric value near any of the provided keywords."""
     normalized = text.replace("\r", " ")
     for keyword in keywords:
         pattern = _keyword_pattern(keyword)
@@ -418,15 +438,12 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
             amount = Decimal(cleaned)
         except (InvalidOperation, ValueError):
             continue
-        quantized = amount.quantize(_CENT)
-        return format(quantized, "f")
+        # Use the variable directly to avoid "assigned but never used"
+        return format(amount.quantize(_CENT), "f")
     return None
 
 
-def _keyword_pattern(keyword: str) -> str:
-    escaped = re.escape(keyword)
-    return escaped.replace("\\ ", r"\s+")
-
+# ----------------------------- Public API (tests) ----------------------------
 
 async def ingest_slip_uploads(
     profile: str,
@@ -436,11 +453,11 @@ async def ingest_slip_uploads(
     settings: Settings,
     app: Any | None = None,
 ) -> list[SlipJobStatus]:
+    """Batch-ingest one or more UploadFile items and return their job statuses."""
     store = resolve_store(app)
     statuses: list[SlipJobStatus] = []
     for upload in uploads:
-        status = await store.process_upload(profile, year, upload, settings=settings)
-        statuses.append(status)
+        statuses.append(await store.process_upload(profile, year, upload, settings=settings))
     return statuses
 
 
@@ -451,6 +468,7 @@ async def slip_job_status(
     *,
     app: Any | None = None,
 ) -> SlipJobStatus:
+    """Helper to query a single job (thin wrapper used by tests/UIs)."""
     store = resolve_store(app)
     return await store.job_status(profile, year, job_id)
 
@@ -462,5 +480,6 @@ async def apply_staged_detections(
     *,
     app: Any | None = None,
 ) -> list[SlipDetection]:
+    """Apply selected (or all) staged detections into the draft layer."""
     store = resolve_store(app)
     return await store.apply(profile, year, detection_ids)
