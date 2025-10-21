@@ -1,6 +1,52 @@
 {% extends "base.html" %}
 {% block head %}
   <style>
+    .stepper {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .stepper button {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.85rem;
+      border: 1px solid #cbd5f5;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #1e293b;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .stepper button:focus-visible {
+      outline: 3px solid rgba(99, 102, 241, 0.45);
+      outline-offset: 2px;
+    }
+    .stepper button[aria-selected="true"] {
+      background: #4338ca;
+      color: #f8fafc;
+      border-color: #4338ca;
+    }
+    .stepper button[aria-selected="true"]::after {
+      content: "";
+      position: absolute;
+      inset-inline-end: 0.75rem;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #facc15;
+    }
+    .stepper-panels {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .step-panel[hidden] {
+      display: none;
+    }
     .form-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -218,331 +264,402 @@
     {% if field_errors %}
       <div class="status-box warning">Some fields need attention. Fix them and try again.</div>
     {% endif %}
-    <form id="return-form" method="post" action="/ui/returns/prepare">
-      <section>
-        <div class="section-heading">Taxpayer details</div>
-        <div class="form-grid">
-          <label class="field">
-            <span>SIN *</span>
-            <input name="taxpayer_sin" value="{{ form_state.taxpayer.sin }}" required />
-            {% if field_errors.get('taxpayer_sin') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_sin') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>First name *</span>
-            <input name="taxpayer_first_name" value="{{ form_state.taxpayer.first_name }}" required />
-            {% if field_errors.get('taxpayer_first_name') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_first_name') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>Last name *</span>
-            <input name="taxpayer_last_name" value="{{ form_state.taxpayer.last_name }}" required />
-            {% if field_errors.get('taxpayer_last_name') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_last_name') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>Date of birth *</span>
-            <input type="date" name="taxpayer_dob" value="{{ form_state.taxpayer.dob }}" required />
-            {% if field_errors.get('taxpayer_dob') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_dob') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>Address line 1 *</span>
-            <input name="taxpayer_address_line1" value="{{ form_state.taxpayer.address_line1 }}" required />
-            {% if field_errors.get('taxpayer_address_line1') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_address_line1') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>City *</span>
-            <input name="taxpayer_city" value="{{ form_state.taxpayer.city }}" required />
-            {% if field_errors.get('taxpayer_city') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_city') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>Province *</span>
-            <input name="taxpayer_province" maxlength="2" value="{{ form_state.taxpayer.province }}" required />
-            {% if field_errors.get('taxpayer_province') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_province') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>Postal code *</span>
-            <input name="taxpayer_postal_code" value="{{ form_state.taxpayer.postal_code }}" required />
-            {% if field_errors.get('taxpayer_postal_code') %}
-              <div class="field-error">{{ field_errors.get('taxpayer_postal_code') }}</div>
-            {% endif %}
-          </label>
-          <label class="field">
-            <span>Residency status</span>
-            <input name="taxpayer_residency_status" value="{{ form_state.taxpayer.residency_status }}" />
-          </label>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-heading">Household</div>
-        <div class="form-grid">
-          <label class="field">
-            <span>Marital status</span>
-            <input name="household_marital_status" value="{{ form_state.household.marital_status }}" />
-          </label>
-          <label class="field">
-            <span>Spouse SIN</span>
-            <input name="household_spouse_sin" value="{{ form_state.household.spouse_sin }}" />
-            {% if field_errors.get('household_spouse_sin') %}
-              <div class="field-error">{{ field_errors.get('household_spouse_sin') }}</div>
-            {% endif %}
-          </label>
-          <label class="field" style="grid-column: 1 / -1;">
-            <span>Dependants (one per line)</span>
-            <textarea name="household_dependants_raw">{{ form_state.household.dependants_raw }}</textarea>
-          </label>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-heading">T4 slips</div>
-        <div class="slip-import">
-          <div
-            id="t4-slip-dropzone"
-            class="dropzone"
-            role="button"
-            tabindex="0"
-            aria-controls="t4-file-queue"
-            aria-describedby="t4-slip-dropzone-help"
-            data-dropzone
+    <form
+      id="return-form"
+      method="post"
+      action="/ui/returns/prepare"
+      data-initial-step="{{ current_step }}"
+      data-current-step="{{ current_step }}"
+      data-autosave-profile="{{ autosave_profile or '' }}"
+      data-autosave-url="{{ autosave_url }}"
+      data-autosave-interval="{{ autosave_interval }}"
+    >
+      <input type="hidden" name="current_step" id="current-step-field" value="{{ current_step }}" />
+      <div class="stepper" role="tablist" aria-label="Return steps" data-stepper>
+        {% for step in form_steps %}
+          <button
+            type="button"
+            role="tab"
+            id="step-{{ step.slug }}"
+            data-step="{{ step.slug }}"
+            data-step-index="{{ loop.index0 }}"
+            aria-controls="panel-{{ step.slug }}"
+            aria-selected="{{ 'true' if step.slug == current_step else 'false' }}"
+            tabindex="{{ '0' if step.slug == current_step else '-1' }}"
           >
-            <div class="dropzone-content">
-              <strong>Import slip files</strong>
-              <span>Drag and drop PDFs or images, or press Enter to browse.</span>
+            {{ step.label }}
+          </button>
+        {% endfor %}
+      </div>
+      <div class="stepper-panels">
+        <section
+          class="step-panel"
+          id="panel-identity"
+          role="tabpanel"
+          aria-labelledby="step-identity"
+          data-step-panel="identity"
+          {% if current_step != 'identity' %}hidden{% endif %}
+        >
+          <section>
+            <div class="section-heading">Taxpayer details</div>
+            <div class="form-grid">
+              <label class="field">
+                <span>SIN *</span>
+                <input name="taxpayer_sin" value="{{ form_state.taxpayer.sin }}" required />
+                {% if field_errors.get('taxpayer_sin') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_sin') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>First name *</span>
+                <input name="taxpayer_first_name" value="{{ form_state.taxpayer.first_name }}" required />
+                {% if field_errors.get('taxpayer_first_name') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_first_name') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>Last name *</span>
+                <input name="taxpayer_last_name" value="{{ form_state.taxpayer.last_name }}" required />
+                {% if field_errors.get('taxpayer_last_name') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_last_name') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>Date of birth *</span>
+                <input type="date" name="taxpayer_dob" value="{{ form_state.taxpayer.dob }}" required />
+                {% if field_errors.get('taxpayer_dob') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_dob') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>Address line 1 *</span>
+                <input name="taxpayer_address_line1" value="{{ form_state.taxpayer.address_line1 }}" required />
+                {% if field_errors.get('taxpayer_address_line1') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_address_line1') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>City *</span>
+                <input name="taxpayer_city" value="{{ form_state.taxpayer.city }}" required />
+                {% if field_errors.get('taxpayer_city') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_city') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>Province *</span>
+                <input name="taxpayer_province" maxlength="2" value="{{ form_state.taxpayer.province }}" required />
+                {% if field_errors.get('taxpayer_province') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_province') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>Postal code *</span>
+                <input name="taxpayer_postal_code" value="{{ form_state.taxpayer.postal_code }}" required />
+                {% if field_errors.get('taxpayer_postal_code') %}
+                  <div class="field-error">{{ field_errors.get('taxpayer_postal_code') }}</div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>Residency status</span>
+                <input name="taxpayer_residency_status" value="{{ form_state.taxpayer.residency_status }}" />
+              </label>
             </div>
-            <div class="dropzone-actions">
-              <span class="btn secondary" aria-hidden="true">Browse files</span>
+          </section>
+          <section>
+            <div class="section-heading">Household</div>
+            <div class="form-grid">
+              <label class="field">
+                <span>Marital status</span>
+                <input name="household_marital_status" value="{{ form_state.household.marital_status }}" />
+              </label>
+              <label class="field">
+                <span>Spouse SIN</span>
+                <input name="household_spouse_sin" value="{{ form_state.household.spouse_sin }}" />
+                {% if field_errors.get('household_spouse_sin') %}
+                  <div class="field-error">{{ field_errors.get('household_spouse_sin') }}</div>
+                {% endif %}
+              </label>
+              <label class="field" style="grid-column: 1 / -1;">
+                <span>Dependants (one per line)</span>
+                <textarea name="household_dependants_raw">{{ form_state.household.dependants_raw }}</textarea>
+              </label>
             </div>
-          </div>
-          <input
-            id="t4-slip-file-input"
-            type="file"
-            accept=".pdf,image/*"
-            multiple
-            hidden
-          />
-          <p id="t4-slip-dropzone-help" class="field-help">
-            Upload slip images or PDFs and queue them for detection before applying the results.
-          </p>
-          <div class="queue-wrapper" aria-live="polite">
-            <ul
-              id="t4-file-queue"
-              class="file-queue"
-              role="list"
-              aria-label="Queued slip files"
-            ></ul>
-          </div>
-          <div class="queue-actions">
-            <button type="button" id="apply-detections" class="btn" disabled>Apply detections</button>
-          </div>
-        </div>
-        <div id="t4-slips">
-          {% for slip in form_state.slips_t4 %}
-            <div class="slip-wrapper t4-slip" data-slip-index="{{ slip.index }}">
-              <div class="slip-header">
-                <h4>T4 slip {{ loop.index }}</h4>
-                <button type="button" class="btn danger remove-slip" {% if form_state.slips_t4|length == 1 %}disabled{% endif %}>Remove</button>
+          </section>
+        </section>
+        <section
+          class="step-panel"
+          id="panel-slips"
+          role="tabpanel"
+          aria-labelledby="step-slips"
+          data-step-panel="slips"
+          {% if current_step != 'slips' %}hidden{% endif %}
+        >
+          <section>
+            <div class="section-heading">T4 slips</div>
+            <div class="slip-import">
+              <div
+                id="t4-slip-dropzone"
+                class="dropzone"
+                role="button"
+                tabindex="0"
+                aria-controls="t4-file-queue"
+                aria-describedby="t4-slip-dropzone-help"
+                data-dropzone
+              >
+                <div class="dropzone-content">
+                  <strong>Import slip files</strong>
+                  <span>Drag and drop PDFs or images, or press Enter to browse.</span>
+                </div>
+                <div class="dropzone-actions">
+                  <span class="btn secondary" aria-hidden="true">Browse files</span>
+                </div>
               </div>
-              <div class="form-grid">
-                <label class="field">
-                  <span>Employment income</span>
-                  <input inputmode="decimal" name="slips_t4-{{ slip.index }}-employment_income" value="{{ slip.employment_income }}" />
-                  {% set key = 'slips_t4-' ~ slip.index ~ '-employment_income' %}
-                  {% if field_errors.get(key) %}<div class="field-error">{{ field_errors.get(key) }}</div>{% endif %}
-                </label>
-                <label class="field">
-                  <span>Tax deducted</span>
-                  <input inputmode="decimal" name="slips_t4-{{ slip.index }}-tax_deducted" value="{{ slip.tax_deducted }}" />
-                  {% set key = 'slips_t4-' ~ slip.index ~ '-tax_deducted' %}
-                  {% if field_errors.get(key) %}<div class="field-error">{{ field_errors.get(key) }}</div>{% endif %}
-                </label>
-                <label class="field">
-                  <span>CPP contributions</span>
-                  <input inputmode="decimal" name="slips_t4-{{ slip.index }}-cpp_contrib" value="{{ slip.cpp_contrib }}" />
-                </label>
-                <label class="field">
-                  <span>EI premiums</span>
-                  <input inputmode="decimal" name="slips_t4-{{ slip.index }}-ei_premiums" value="{{ slip.ei_premiums }}" />
-                </label>
-                <label class="field">
-                  <span>Pensionable earnings</span>
-                  <input inputmode="decimal" name="slips_t4-{{ slip.index }}-pensionable_earnings" value="{{ slip.pensionable_earnings }}" />
-                </label>
-                <label class="field">
-                  <span>Insurable earnings</span>
-                  <input inputmode="decimal" name="slips_t4-{{ slip.index }}-insurable_earnings" value="{{ slip.insurable_earnings }}" />
-                </label>
+              <input
+                id="t4-slip-file-input"
+                type="file"
+                accept=".pdf,image/*"
+                multiple
+                hidden
+              />
+              <p id="t4-slip-dropzone-help" class="field-help">
+                Upload slip images or PDFs and queue them for detection before applying the results.
+              </p>
+              <div class="queue-wrapper" aria-live="polite">
+                <ul
+                  id="t4-file-queue"
+                  class="file-queue"
+                  role="list"
+                  aria-label="Queued slip files"
+                ></ul>
+              </div>
+              <div class="queue-actions">
+                <button type="button" id="apply-detections" class="btn" disabled>Apply detections</button>
               </div>
             </div>
-          {% endfor %}
-        </div>
-        <button type="button" id="add-slip" class="btn secondary">Add another T4 slip</button>
-      </section>
-
-      <section>
-        <div class="section-heading">Return settings</div>
-        <div class="form-grid">
-          <label class="field">
-            <span>Province of residence</span>
-            <input name="province" maxlength="2" value="{{ form_state.province }}" />
-            {% if field_errors.get('province') %}<div class="field-error">{{ field_errors.get('province') }}</div>{% endif %}
-          </label>
-          <label class="field">
-            <span>Tax year</span>
-            <input name="tax_year" inputmode="numeric" value="{{ form_state.tax_year }}" />
-            {% if field_errors.get('tax_year') %}<div class="field-error">{{ field_errors.get('tax_year') }}</div>{% endif %}
-            {% if supported_tax_years %}
-              <div class="field-help">
-                {% for year in supported_tax_years %}
-                  {% set year_key = year|string %}
-                  {% set info = efile_transmit_gate.get(year_key) %}
-                  <div class="year-availability" data-tax-year="{{ year }}">
-                    {{ year }} — {% if info and info.allowed %}Transmit enabled{% else %}<strong>Estimate only</strong>{% endif %}
+            <div id="t4-slips">
+              {% for slip in form_state.slips_t4 %}
+                <div class="slip-wrapper t4-slip" data-slip-index="{{ slip.index }}">
+                  <div class="slip-header">
+                    <h4>T4 slip <span class="slip-number">{{ loop.index }}</span></h4>
+                    <button type="button" class="btn danger remove-slip" {% if form_state.slips_t4|length == 1 %}disabled{% endif %}>Remove</button>
                   </div>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>Employment income</span>
+                      <input inputmode="decimal" name="slips_t4-{{ slip.index }}-employment_income" value="{{ slip.employment_income }}" />
+                      {% set key = 'slips_t4-' ~ slip.index ~ '-employment_income' %}
+                      {% if field_errors.get(key) %}<div class="field-error">{{ field_errors.get(key) }}</div>{% endif %}
+                    </label>
+                    <label class="field">
+                      <span>Tax deducted</span>
+                      <input inputmode="decimal" name="slips_t4-{{ slip.index }}-tax_deducted" value="{{ slip.tax_deducted }}" />
+                      {% set key = 'slips_t4-' ~ slip.index ~ '-tax_deducted' %}
+                      {% if field_errors.get(key) %}<div class="field-error">{{ field_errors.get(key) }}</div>{% endif %}
+                    </label>
+                    <label class="field">
+                      <span>CPP contributions</span>
+                      <input inputmode="decimal" name="slips_t4-{{ slip.index }}-cpp_contrib" value="{{ slip.cpp_contrib }}" />
+                    </label>
+                    <label class="field">
+                      <span>EI premiums</span>
+                      <input inputmode="decimal" name="slips_t4-{{ slip.index }}-ei_premiums" value="{{ slip.ei_premiums }}" />
+                    </label>
+                    <label class="field">
+                      <span>Pensionable earnings</span>
+                      <input inputmode="decimal" name="slips_t4-{{ slip.index }}-pensionable_earnings" value="{{ slip.pensionable_earnings }}" />
+                    </label>
+                    <label class="field">
+                      <span>Insurable earnings</span>
+                      <input inputmode="decimal" name="slips_t4-{{ slip.index }}-insurable_earnings" value="{{ slip.insurable_earnings }}" />
+                    </label>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+            <button type="button" id="add-slip" class="btn secondary">Add another T4 slip</button>
+          </section>
+        </section>
+        <section
+          class="step-panel"
+          id="panel-deductions"
+          role="tabpanel"
+          aria-labelledby="step-deductions"
+          data-step-panel="deductions"
+          {% if current_step != 'deductions' %}hidden{% endif %}
+        >
+          <section>
+            <div class="section-heading">Return settings</div>
+            <div class="form-grid">
+              <label class="field">
+                <span>Province of residence</span>
+                <input name="province" maxlength="2" value="{{ form_state.province }}" />
+                {% if field_errors.get('province') %}<div class="field-error">{{ field_errors.get('province') }}</div>{% endif %}
+              </label>
+              <label class="field">
+                <span>Tax year</span>
+                <input name="tax_year" inputmode="numeric" value="{{ form_state.tax_year }}" />
+                {% if field_errors.get('tax_year') %}<div class="field-error">{{ field_errors.get('tax_year') }}</div>{% endif %}
+                {% if supported_tax_years %}
+                  <div class="field-help">
+                    {% for year in supported_tax_years %}
+                      {% set year_key = year|string %}
+                      {% set info = efile_transmit_gate.get(year_key) %}
+                      <div class="year-availability" data-tax-year="{{ year }}">
+                        {{ year }} — {% if info and info.allowed %}Transmit enabled{% else %}<strong>Estimate only</strong>{% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </label>
+              <label class="field">
+                <span>RRSP contributions</span>
+                <input inputmode="decimal" name="rrsp_contrib" value="{{ form_state.rrsp_contrib }}" />
+              </label>
+            </div>
+          </section>
+          <section>
+            <div class="section-heading">T183 signature capture</div>
+            <div class="form-grid">
+              <label class="field">
+                <span>Signature timestamp</span>
+                <input type="datetime-local" name="t183_signed_ts" value="{{ form_state.t183.signed_ts }}" />
+              </label>
+              <label class="field">
+                <span>IP hash</span>
+                <input name="t183_ip_hash" value="{{ form_state.t183.ip_hash }}" />
+              </label>
+              <label class="field">
+                <span>User-Agent hash</span>
+                <input name="t183_user_agent_hash" value="{{ form_state.t183.user_agent_hash }}" />
+              </label>
+              <label class="field">
+                <span>T183 PDF path</span>
+                <input name="t183_pdf_path" value="{{ form_state.t183.pdf_path }}" />
+              </label>
+            </div>
+          </section>
+          <section>
+            <div class="section-heading">Outputs</div>
+            <div class="form-grid">
+              <label class="field">
+                <span>T1 PDF output path</span>
+                <input name="out_path" value="{{ form_state.outputs.out_path }}" />
+              </label>
+            </div>
+          </section>
+        </section>
+        <section
+          class="step-panel"
+          id="panel-review"
+          role="tabpanel"
+          aria-labelledby="step-review"
+          data-step-panel="review"
+          {% if current_step != 'review' %}hidden{% endif %}
+        >
+          <section>
+            <div class="section-heading">Review your entries</div>
+            <p>Compute the return to validate totals and review any warnings before printing or transmitting.</p>
+            <div class="actions-row">
+              <button type="submit" class="btn">Compute return</button>
+              <a class="btn secondary" href="/ui/returns/new">Reset form</a>
+            </div>
+          </section>
+          <div class="card" id="prepare-results" {% if not calc and not payload_json and not issues %}hidden{% endif %}>
+            <h3>Preparation results</h3>
+            <div id="prepare-status-message" class="status-box {% if prepare_ok %}success{% elif issues %}warning{% endif %}">
+              {% if prepare_ok %}
+                <p>Return validated. Use the actions below to generate printouts or transmit electronically.</p>
+              {% elif issues %}
+                <p>Validation issues were reported. Resolve them before transmitting.</p>
+              {% else %}
+                <p>Complete the return form and choose “Compute return” to see results.</p>
+              {% endif %}
+            </div>
+            <div id="prepare-issues" {% if not issues %}hidden{% endif %}>
+              <ul class="messages">
+                {% for issue in issues %}
+                  <li>{{ issue }}</li>
                 {% endfor %}
+              </ul>
+            </div>
+            {% if calc %}
+              <div class="preview">
+                <h4>Totals</h4>
+                <table class="striped">
+                  <tbody id="calc-totals-body">
+                    {% for key, value in calc.totals.items() %}
+                      <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
               </div>
+              <details open>
+                <summary>Calculation details</summary>
+                <pre id="calc-json">{{ calc_json }}</pre>
+              </details>
+            {% else %}
+              <pre id="calc-json" hidden></pre>
             {% endif %}
-          </label>
-          <label class="field">
-            <span>RRSP contributions</span>
-            <input inputmode="decimal" name="rrsp_contrib" value="{{ form_state.rrsp_contrib }}" />
-          </label>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-heading">T183 signature capture</div>
-        <div class="form-grid">
-          <label class="field">
-            <span>Signature timestamp</span>
-            <input type="datetime-local" name="t183_signed_ts" value="{{ form_state.t183.signed_ts }}" />
-          </label>
-          <label class="field">
-            <span>IP hash</span>
-            <input name="t183_ip_hash" value="{{ form_state.t183.ip_hash }}" />
-          </label>
-          <label class="field">
-            <span>User-Agent hash</span>
-            <input name="t183_user_agent_hash" value="{{ form_state.t183.user_agent_hash }}" />
-          </label>
-          <label class="field">
-            <span>T183 PDF path</span>
-            <input name="t183_pdf_path" value="{{ form_state.t183.pdf_path }}" />
-          </label>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-heading">Outputs</div>
-        <div class="form-grid">
-          <label class="field">
-            <span>T1 PDF output path</span>
-            <input name="out_path" value="{{ form_state.outputs.out_path }}" />
-          </label>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-heading">EFILE transmission overrides</div>
-        <div class="form-grid">
-          <label class="field">
-            <span>Endpoint override</span>
-            <input name="endpoint" value="{{ form_state.efile.endpoint }}" />
-          </label>
-          <label class="field">
-            <span>Software ID</span>
-            <input name="software_id" value="{{ form_state.efile.software_id }}" />
-          </label>
-          <label class="field">
-            <span>Software version</span>
-            <input name="software_ver" value="{{ form_state.efile.software_ver }}" />
-          </label>
-          <label class="field">
-            <span>Transmitter ID</span>
-            <input name="transmitter_id" value="{{ form_state.efile.transmitter_id }}" />
-          </label>
-        </div>
-      </section>
-
-      <div class="actions-row">
-        <button type="submit" class="btn">Compute return</button>
-        <a class="btn secondary" href="/ui/returns/new">Reset form</a>
+            {% if payload_json %}
+              <details>
+                <summary>Submitted payload</summary>
+                <pre id="payload-json">{{ payload_json }}</pre>
+              </details>
+            {% else %}
+              <pre id="payload-json" hidden></pre>
+            {% endif %}
+          </div>
+        </section>
+        <section
+          class="step-panel"
+          id="panel-transmit"
+          role="tabpanel"
+          aria-labelledby="step-transmit"
+          data-step-panel="transmit"
+          {% if current_step != 'transmit' %}hidden{% endif %}
+        >
+          <section>
+            <div class="section-heading">Print and transmit</div>
+            <div class="actions-row">
+              <button type="button" id="print-button" class="btn">Render T1 PDF</button>
+              <button type="button" id="efile-button" class="btn">Transmit via EFILE</button>
+              <span
+                id="efile-availability-note"
+                class="status-note{% if not efile_selected_year_allowed %} warning{% endif %}"
+                {% if efile_selected_year_allowed or not efile_selected_year_message %}hidden{% endif %}
+              >{{ efile_selected_year_message }}</span>
+            </div>
+            <div id="print-status" class="status-box" hidden></div>
+            <div id="efile-status" class="status-box" hidden></div>
+          </section>
+          <section>
+            <div class="section-heading">EFILE transmission overrides</div>
+            <div class="form-grid">
+              <label class="field">
+                <span>Endpoint override</span>
+                <input name="endpoint" value="{{ form_state.efile.endpoint }}" />
+              </label>
+              <label class="field">
+                <span>Software ID</span>
+                <input name="software_id" value="{{ form_state.efile.software_id }}" />
+              </label>
+              <label class="field">
+                <span>Software version</span>
+                <input name="software_ver" value="{{ form_state.efile.software_ver }}" />
+              </label>
+              <label class="field">
+                <span>Transmitter ID</span>
+                <input name="transmitter_id" value="{{ form_state.efile.transmitter_id }}" />
+              </label>
+            </div>
+          </section>
+          <section id="artifact-section" hidden>
+            <div class="section-heading">Generated artifacts</div>
+            <ul id="artifact-list" class="artifact-list"></ul>
+          </section>
+        </section>
       </div>
     </form>
-  </div>
-
-  <div class="card" id="prepare-results" {% if not calc and not payload_json and not issues %}hidden{% endif %}>
-    <h2>Preparation results</h2>
-    <div id="prepare-status-message" class="status-box {% if prepare_ok %}success{% elif issues %}warning{% endif %}">
-      {% if prepare_ok %}
-        <p>Return validated. Use the actions below to generate printouts or transmit electronically.</p>
-      {% elif issues %}
-        <p>Validation issues were reported. Resolve them before transmitting.</p>
-      {% else %}
-        <p>Complete the return form and choose “Compute return” to see results.</p>
-      {% endif %}
-    </div>
-    <div id="prepare-issues" {% if not issues %}hidden{% endif %}>
-      <ul class="messages">
-        {% for issue in issues %}
-          <li>{{ issue }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% if calc %}
-      <div class="preview">
-        <h3>Totals</h3>
-        <table class="striped">
-          <tbody id="calc-totals-body">
-            {% for key, value in calc.totals.items() %}
-              <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      <details open>
-        <summary>Calculation details</summary>
-        <pre id="calc-json">{{ calc_json }}</pre>
-      </details>
-    {% else %}
-      <pre id="calc-json" hidden></pre>
-    {% endif %}
-    {% if payload_json %}
-      <details>
-        <summary>Submitted payload</summary>
-        <pre id="payload-json">{{ payload_json }}</pre>
-      </details>
-    {% else %}
-      <pre id="payload-json" hidden></pre>
-    {% endif %}
-    <div class="actions-row">
-      <button type="button" id="print-button" class="btn">Render T1 PDF</button>
-      <button type="button" id="efile-button" class="btn">Transmit via EFILE</button>
-      <span
-        id="efile-availability-note"
-        class="status-note{% if not efile_selected_year_allowed %} warning{% endif %}"
-        {% if efile_selected_year_allowed or not efile_selected_year_message %}hidden{% endif %}
-      >{{ efile_selected_year_message }}</span>
-    </div>
-    <div id="print-status" class="status-box" hidden></div>
-    <div id="efile-status" class="status-box" hidden></div>
-    <section id="artifact-section" hidden>
-      <h3>Generated artifacts</h3>
-      <ul id="artifact-list" class="artifact-list"></ul>
-    </section>
-  </div>
 
   <template id="t4-slip-template">
     <div class="slip-wrapper t4-slip" data-slip-index="__index__">
@@ -693,6 +810,78 @@
         }
       });
       return slips;
+    }
+
+    function collectSlipState() {
+      const slips = [];
+      const wrappers = form.querySelectorAll(".t4-slip");
+      wrappers.forEach((wrapper, position) => {
+        const index = Number.parseInt(wrapper.dataset.slipIndex || String(position), 10);
+        const normalizedIndex = Number.isNaN(index) ? position : index;
+        slips.push({
+          index: normalizedIndex,
+          employment_income: formValue(`slips_t4-${normalizedIndex}-employment_income`),
+          tax_deducted: formValue(`slips_t4-${normalizedIndex}-tax_deducted`),
+          cpp_contrib: formValue(`slips_t4-${normalizedIndex}-cpp_contrib`),
+          ei_premiums: formValue(`slips_t4-${normalizedIndex}-ei_premiums`),
+          pensionable_earnings: formValue(`slips_t4-${normalizedIndex}-pensionable_earnings`),
+          insurable_earnings: formValue(`slips_t4-${normalizedIndex}-insurable_earnings`),
+        });
+      });
+      if (slips.length === 0) {
+        slips.push({
+          index: 0,
+          employment_income: "",
+          tax_deducted: "",
+          cpp_contrib: "",
+          ei_premiums: "",
+          pensionable_earnings: "",
+          insurable_earnings: "",
+        });
+      }
+      return slips;
+    }
+
+    function collectFormState() {
+      const defaultProvince = "ON";
+      const defaultTaxYear = "2025";
+      return {
+        taxpayer: {
+          sin: formValue("taxpayer_sin"),
+          first_name: formValue("taxpayer_first_name"),
+          last_name: formValue("taxpayer_last_name"),
+          dob: formValue("taxpayer_dob"),
+          address_line1: formValue("taxpayer_address_line1"),
+          city: formValue("taxpayer_city"),
+          province: formValue("taxpayer_province") || defaultProvince,
+          postal_code: formValue("taxpayer_postal_code"),
+          residency_status: formValue("taxpayer_residency_status") || "resident",
+        },
+        household: {
+          marital_status: formValue("household_marital_status") || "single",
+          spouse_sin: formValue("household_spouse_sin"),
+          dependants_raw: formValue("household_dependants_raw"),
+        },
+        slips_t4: collectSlipState(),
+        rrsp_contrib: formValue("rrsp_contrib") || "0.00",
+        province: formValue("province") || formValue("taxpayer_province") || defaultProvince,
+        tax_year: formValue("tax_year") || defaultTaxYear,
+        t183: {
+          signed_ts: formValue("t183_signed_ts"),
+          ip_hash: formValue("t183_ip_hash"),
+          user_agent_hash: formValue("t183_user_agent_hash"),
+          pdf_path: formValue("t183_pdf_path"),
+        },
+        outputs: {
+          out_path: formValue("out_path") || "artifacts/printouts/t1.pdf",
+        },
+        efile: {
+          endpoint: formValue("endpoint"),
+          software_id: formValue("software_id"),
+          software_ver: formValue("software_ver"),
+          transmitter_id: formValue("transmitter_id"),
+        },
+      };
     }
 
     function normalizeTimestamp(value) {
@@ -898,6 +1087,13 @@
     taxYearField?.addEventListener("input", updateEfileAvailability);
     taxYearField?.addEventListener("change", updateEfileAvailability);
     updateEfileAvailability();
+    if (typeof window !== "undefined") {
+      window.__returnForm = {
+        form,
+        buildPayload,
+        collectFormState,
+      };
+    }
   </script>
   <script type="module" src="{{ url_for('ui_static', path='js/return_form.js') }}"></script>
 {% endblock %}

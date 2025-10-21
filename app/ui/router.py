@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.datastructures import UploadFile as StarletteUploadFile  # for type-narrowing form inputs
 
 from app.config import Settings, get_settings
@@ -42,6 +42,18 @@ router = APIRouter(prefix="/ui", tags=["ui"])
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
 STATIC_ROOT = UI_ROOT / "static"
+PROFILE_DRAFTS_ROOT = BASE_DIR / "profiles"
+
+FORM_STEPS: list[dict[str, str]] = [
+    {"slug": "identity", "label": "Identity"},
+    {"slug": "slips", "label": "Slips"},
+    {"slug": "deductions", "label": "Deductions"},
+    {"slug": "review", "label": "Review"},
+    {"slug": "transmit", "label": "Print/Transmit"},
+]
+FORM_STEP_SLUGS = {step["slug"] for step in FORM_STEPS}
+DEFAULT_FORM_STEP = FORM_STEPS[0]["slug"]
+AUTOSAVE_INTERVAL_MS = 20000
 
 
 @router.get("/static/{path:path}", name="ui_static")
@@ -297,6 +309,149 @@ def _default_return_form_state() -> dict[str, Any]:
             "transmitter_id": "",
         },
     }
+
+
+def _normalize_step(step: str | None) -> str:
+    if not step:
+        return DEFAULT_FORM_STEP
+    candidate = str(step).strip().lower()
+    if candidate in FORM_STEP_SLUGS:
+        return candidate
+    return DEFAULT_FORM_STEP
+
+
+def _profile_draft_dir(slug: str) -> Path:
+    return (PROFILE_DRAFTS_ROOT / slug).resolve()
+
+
+def _profile_draft_path(slug: str) -> Path:
+    return _profile_draft_dir(slug) / "draft.json"
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _coerce_slip_state(entry: dict[str, Any], fallback_index: int) -> dict[str, Any]:
+    slip = _blank_slip_state(fallback_index)
+    index_value = entry.get("index", fallback_index)
+    try:
+        slip_index = int(index_value)
+    except (TypeError, ValueError):
+        slip_index = fallback_index
+    slip["index"] = slip_index
+    for key in (
+        "employment_income",
+        "tax_deducted",
+        "cpp_contrib",
+        "ei_premiums",
+        "pensionable_earnings",
+        "insurable_earnings",
+    ):
+        slip[key] = _coerce_text(entry.get(key))
+    return slip
+
+
+def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
+    state = base
+    taxpayer_saved = saved.get("taxpayer")
+    if isinstance(taxpayer_saved, dict):
+        for key in state["taxpayer"].keys():
+            state["taxpayer"][key] = _coerce_text(taxpayer_saved.get(key))
+    household_saved = saved.get("household")
+    if isinstance(household_saved, dict):
+        state["household"]["marital_status"] = _coerce_text(household_saved.get("marital_status"))
+        state["household"]["spouse_sin"] = _coerce_text(household_saved.get("spouse_sin"))
+        state["household"]["dependants_raw"] = _coerce_text(household_saved.get("dependants_raw"))
+    slips_saved = saved.get("slips_t4")
+    if isinstance(slips_saved, list):
+        slips: list[dict[str, Any]] = []
+        for position, entry in enumerate(slips_saved):
+            if isinstance(entry, dict):
+                slips.append(_coerce_slip_state(entry, position))
+        if slips:
+            state["slips_t4"] = slips
+    if "rrsp_contrib" in saved:
+        state["rrsp_contrib"] = _coerce_text(saved.get("rrsp_contrib"))
+    if "province" in saved:
+        state["province"] = _coerce_text(saved.get("province"))
+    if "tax_year" in saved:
+        state["tax_year"] = _coerce_text(saved.get("tax_year"))
+    t183_saved = saved.get("t183")
+    if isinstance(t183_saved, dict):
+        for key in state["t183"].keys():
+            state["t183"][key] = _coerce_text(t183_saved.get(key))
+    outputs_saved = saved.get("outputs")
+    if isinstance(outputs_saved, dict) and "out_path" in outputs_saved:
+        state["outputs"]["out_path"] = _coerce_text(outputs_saved.get("out_path"))
+    efile_saved = saved.get("efile")
+    if isinstance(efile_saved, dict):
+        for key in state["efile"].keys():
+            state["efile"][key] = _coerce_text(efile_saved.get(key))
+    return state
+
+
+def _load_return_draft(slug: str) -> tuple[dict[str, Any], str | None, str | None, bool]:
+    path = _profile_draft_path(slug)
+    if not path.exists():
+        return {}, None, None, False
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, None, None, False
+    state_data = raw.get("state") or raw.get("form_state")
+    state: dict[str, Any] = {}
+    has_state = isinstance(state_data, dict)
+    if has_state:
+        state = _merge_return_form_state(_default_return_form_state(), state_data)
+    step_value = raw.get("step") if isinstance(raw.get("step"), str) else None
+    normalized_step = _normalize_step(step_value) if step_value else None
+    updated_at_raw = raw.get("updated_at")
+    timestamp = str(updated_at_raw) if isinstance(updated_at_raw, str) else None
+    return state, normalized_step, timestamp, has_state
+
+
+def _save_return_draft(slug: str, state: dict[str, Any], step: str) -> None:
+    directory = _profile_draft_dir(slug)
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "state": state,
+        "step": step,
+        "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }
+    path = _profile_draft_path(slug)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+class ReturnAutosavePayload(BaseModel):
+    profile: str = Field(..., min_length=1)
+    step: str = Field(..., min_length=1)
+    state: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("profile")
+    @classmethod
+    def validate_profile(cls, value: str) -> str:
+        slug = slugify(value)
+        if not slug:
+            raise ValueError("Invalid profile identifier")
+        return slug
+
+    @field_validator("step")
+    @classmethod
+    def validate_step(cls, value: str) -> str:
+        candidate = str(value).strip().lower()
+        if candidate not in FORM_STEP_SLUGS:
+            raise ValueError("Invalid step")
+        return candidate
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("State must be an object")
+        return value
 
 
 def _normalize_datetime_field(value: str) -> str | None:
@@ -613,12 +768,25 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
     return TEMPLATES.TemplateResponse("preview.html", context)
 
 
-@router.get("/returns/new", response_class=HTMLResponse)
-def new_return(request: Request) -> HTMLResponse:
+def _render_return_form(request: Request, step: str | None) -> HTMLResponse:
     settings = _resolve_settings(request)
+    form_state = _default_return_form_state()
+    current_step = _normalize_step(step)
+    messages: list[str] = []
+    autosave_profile = get_active_profile()
+    autosave_url = ""
+    if autosave_profile:
+        saved_state, saved_step, saved_timestamp, has_state = _load_return_draft(autosave_profile)
+        if has_state:
+            form_state = saved_state
+        if saved_step:
+            current_step = saved_step
+        if saved_timestamp:
+            messages.append(f"Loaded draft saved at {saved_timestamp}.")
+        autosave_url = request.url_for("ui_autosave_return")
     context: dict[str, Any] = {
         "request": request,
-        "form_state": _default_return_form_state(),
+        "form_state": form_state,
         "field_errors": {},
         "issues": [],
         "calc": None,
@@ -627,10 +795,25 @@ def new_return(request: Request) -> HTMLResponse:
         "prepare_ok": False,
         "artifact_paths": [],
         "format_currency": _format_currency,
-        "messages": [],
+        "messages": messages,
+        "form_steps": FORM_STEPS,
+        "current_step": current_step,
+        "autosave_profile": autosave_profile,
+        "autosave_url": autosave_url,
+        "autosave_interval": AUTOSAVE_INTERVAL_MS,
     }
-    context.update(_transmit_gate_context(context["form_state"], settings))
+    context.update(_transmit_gate_context(form_state, settings))
     return TEMPLATES.TemplateResponse("return_form.html", context)
+
+
+@router.get("/returns/new", response_class=HTMLResponse)
+def new_return(request: Request, step: str | None = Query(None)) -> HTMLResponse:
+    return _render_return_form(request, step)
+
+
+@router.get("/returns/new/{step_slug}", response_class=HTMLResponse)
+def new_return_step(request: Request, step_slug: str) -> HTMLResponse:
+    return _render_return_form(request, step_slug)
 
 
 @router.post("/returns/prepare", response_class=HTMLResponse)
@@ -638,6 +821,8 @@ async def prepare_return(request: Request) -> HTMLResponse:
     form = await request.form()
     form_dict = {key: form.get(key) for key in form.keys()}
     payload, field_errors, state = _parse_return_form(form_dict)
+
+    current_step = _normalize_step(_form_text(form.get("current_step")))
 
     issues: list[str] = []
     calc_dump: dict[str, Any] | None = None
@@ -656,6 +841,12 @@ async def prepare_return(request: Request) -> HTMLResponse:
             calc_json = json.dumps(calc_dump, indent=2)
 
     settings = _resolve_settings(request)
+    autosave_profile = get_active_profile()
+    autosave_url = request.url_for("ui_autosave_return") if autosave_profile else ""
+
+    messages: list[str] = []
+    if payload is None:
+        messages.append("Please review the highlighted fields before continuing.")
     context: dict[str, Any] = {
         "request": request,
         "form_state": state,
@@ -667,13 +858,27 @@ async def prepare_return(request: Request) -> HTMLResponse:
         "prepare_ok": payload is not None and not issues,
         "artifact_paths": [],
         "format_currency": _format_currency,
+        "messages": messages,
+        "form_steps": FORM_STEPS,
+        "current_step": current_step,
+        "autosave_profile": autosave_profile,
+        "autosave_url": autosave_url,
+        "autosave_interval": AUTOSAVE_INTERVAL_MS,
     }
-    messages: list[str] = []
-    if payload is None:
-        messages.append("Please review the highlighted fields before continuing.")
-    context["messages"] = messages
     context.update(_transmit_gate_context(state, settings))
     return TEMPLATES.TemplateResponse("return_form.html", context, status_code=status_code)
+
+
+@router.post("/returns/autosave", response_class=JSONResponse, name="ui_autosave_return")
+async def autosave_return(request: Request, payload: ReturnAutosavePayload) -> JSONResponse:
+    active_profile = get_active_profile()
+    if not active_profile:
+        raise HTTPException(status_code=400, detail="No active profile selected for autosave")
+    if payload.profile != active_profile:
+        raise HTTPException(status_code=400, detail="Autosave profile mismatch")
+    sanitized_state = _merge_return_form_state(_default_return_form_state(), payload.state)
+    _save_return_draft(payload.profile, sanitized_state, payload.step)
+    return JSONResponse({"saved": True, "step": payload.step})
 
 
 @router.post("/returns/{profile}/{year}/slips/upload", response_class=JSONResponse)
