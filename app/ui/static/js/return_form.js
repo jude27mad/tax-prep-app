@@ -38,6 +38,155 @@ let nextSlipIndex = 0;
 let queueCounter = 0;
 const fileQueue = [];
 const detectionStore = new Map();
+const pollTimers = new Map();
+const SLIP_STATUS_POLL_INTERVAL = 2500;
+const SLIP_PERSIST_VERSION = 1;
+let lastPersistKey = "";
+
+function getGlobalApi() {
+  if (typeof window === "undefined") return null;
+  if (!window.__returnForm) {
+    window.__returnForm = {};
+  }
+  return window.__returnForm;
+}
+
+function getActiveProfile() {
+  return formRoot?.dataset.activeProfile || "";
+}
+
+function getActiveYear() {
+  return formRoot?.dataset.activeYear || "";
+}
+
+function buildSlipUploadUrl() {
+  const profile = getActiveProfile();
+  const year = getActiveYear();
+  if (!profile || !year) {
+    return "";
+  }
+  return `/ui/returns/${encodeURIComponent(profile)}/${encodeURIComponent(
+    year,
+  )}/slips/upload`;
+}
+
+function buildSlipStatusUrl(jobId) {
+  const profile = getActiveProfile();
+  const year = getActiveYear();
+  if (!profile || !year || !jobId) {
+    return "";
+  }
+  const base = `/ui/returns/${encodeURIComponent(profile)}/${encodeURIComponent(
+    year,
+  )}/slips/status`;
+  const params = new URLSearchParams({ job_id: jobId });
+  return `${base}?${params.toString()}`;
+}
+
+function persistStorageKey() {
+  const profile = getActiveProfile();
+  const year = getActiveYear();
+  if (!profile || !year) {
+    return "";
+  }
+  return `return-form:${profile}:${year}:slip-jobs:v${SLIP_PERSIST_VERSION}`;
+}
+
+function readSessionStorage(key) {
+  if (!key || typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.sessionStorage?.getItem(key) ?? null;
+  } catch (error) {
+    console.warn("Unable to read sessionStorage", error);
+    return null;
+  }
+}
+
+function writeSessionStorage(key, value) {
+  if (!key || typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (value === null) {
+      window.sessionStorage?.removeItem(key);
+    } else {
+      window.sessionStorage?.setItem(key, value);
+    }
+  } catch (error) {
+    console.warn("Unable to write sessionStorage", error);
+  }
+}
+
+function updateGlobalSlipJobs(jobs) {
+  const api = getGlobalApi();
+  if (!api) return;
+  api.slipJobs = jobs;
+}
+
+function persistQueueState() {
+  if (!formRoot) return;
+  const jobs = fileQueue
+    .filter((entry) => Boolean(entry.jobId))
+    .map((entry) => ({
+      id: entry.id,
+      jobId: entry.jobId,
+      name: entry.name || entry.file?.name || "",
+      size: entry.size ?? entry.file?.size ?? 0,
+      status: entry.status,
+      error: entry.error || "",
+      detection: entry.detection || null,
+    }));
+  const serialized = JSON.stringify(jobs);
+  formRoot.dataset.slipJobs = serialized;
+  updateGlobalSlipJobs(jobs);
+  const key = persistStorageKey();
+  if (lastPersistKey && lastPersistKey !== key) {
+    writeSessionStorage(lastPersistKey, null);
+  }
+  lastPersistKey = key;
+  writeSessionStorage(key, serialized);
+}
+
+function loadPersistedJobs() {
+  if (!formRoot) return [];
+  const key = persistStorageKey();
+  const stored = readSessionStorage(key) || formRoot.dataset.slipJobs || "";
+  if (!stored) {
+    const api = getGlobalApi();
+    if (api?.slipJobs && Array.isArray(api.slipJobs)) {
+      return api.slipJobs;
+    }
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(stored);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (error) {
+    console.warn("Unable to parse persisted slip jobs", error);
+  }
+  return [];
+}
+
+function cancelStatusPoll(entryId) {
+  const timer = pollTimers.get(entryId);
+  if (typeof timer === "number") {
+    clearTimeout(timer);
+  }
+  pollTimers.delete(entryId);
+}
+
+function scheduleStatusPoll(entry, delay = SLIP_STATUS_POLL_INTERVAL) {
+  cancelStatusPoll(entry.id);
+  if (typeof window === "undefined") return;
+  const timer = window.setTimeout(() => {
+    void pollJobStatus(entry);
+  }, delay);
+  pollTimers.set(entry.id, timer);
+}
 const scheduleMicrotask =
   typeof queueMicrotask === "function"
     ? queueMicrotask
@@ -126,10 +275,16 @@ function renderQueue() {
     meta.className = "file-meta";
     const name = document.createElement("span");
     name.className = "file-name";
-    name.textContent = entry.file.name;
+    name.textContent =
+      entry.file?.name || entry.name || entry.detection?.original_filename || "Slip";
     const size = document.createElement("span");
     size.className = "file-size";
-    size.textContent = formatSize(entry.file.size);
+    const rawSize =
+      entry.file?.size ??
+      (typeof entry.size === "number" ? entry.size : null) ??
+      entry.detection?.size ??
+      null;
+    size.textContent = formatSize(rawSize);
     const status = document.createElement("span");
     status.className = `file-status ${entry.status}`;
     status.textContent = statusText(entry);
@@ -139,7 +294,9 @@ function renderQueue() {
     removeButton.type = "button";
     removeButton.className = "btn danger file-remove";
     removeButton.dataset.entryId = entry.id;
-    removeButton.setAttribute("aria-label", `Remove ${entry.file.name}`);
+    const labelName =
+      entry.file?.name || entry.name || entry.detection?.original_filename || "slip";
+    removeButton.setAttribute("aria-label", `Remove ${labelName}`);
     removeButton.textContent = "Remove";
     removeButton.addEventListener("click", () => {
       removeQueuedFile(entry.id, { preferredIndex: index });
@@ -152,6 +309,9 @@ function renderQueue() {
 }
 
 function formatSize(size) {
+  if (typeof size !== "number" || Number.isNaN(size) || size < 0) {
+    return "-";
+  }
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
@@ -170,33 +330,167 @@ function statusText(entry) {
   return "Queued";
 }
 
-function stageFile(entry) {
+function applyJobStatus(entry, payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+  if (payload.job_id) {
+    entry.jobId = payload.job_id;
+  }
+  const status = payload.status;
+  if (status === "complete") {
+    if (payload.detection) {
+      entry.status = "ready";
+      entry.error = "";
+      entry.detection = payload.detection;
+      entry.name = entry.name || payload.detection.original_filename || entry.name;
+      if (typeof payload.detection.size === "number") {
+        entry.size = payload.detection.size;
+      }
+      detectionStore.set(entry.id, payload.detection);
+      return;
+    }
+    entry.status = "error";
+    entry.error = "Slip processing completed without a detection";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    return;
+  }
+  if (status === "error") {
+    entry.status = "error";
+    entry.error = payload.error || "Unable to process slip";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    return;
+  }
+  entry.status = "processing";
+  entry.error = "";
+  entry.detection = null;
+  detectionStore.delete(entry.id);
+}
+
+async function pollJobStatus(entry) {
+  if (!entry || !entry.jobId) {
+    return;
+  }
+  if (!fileQueue.some((item) => item.id === entry.id)) {
+    cancelStatusPoll(entry.id);
+    return;
+  }
+  const statusUrl = buildSlipStatusUrl(entry.jobId);
+  if (!statusUrl) {
+    entry.status = "error";
+    entry.error = "Select a profile and tax year before uploading";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+    return;
+  }
+  try {
+    const response = await fetch(statusUrl, { method: "GET" });
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      throw new Error("Invalid status response");
+    }
+    if (!response.ok) {
+      const detail = data?.detail || `Status check failed (${response.status})`;
+      throw new Error(detail);
+    }
+    if (!data || typeof data !== "object") {
+      throw new Error("Invalid status response");
+    }
+    applyJobStatus(entry, data);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+    if (entry.status === "processing") {
+      scheduleStatusPoll(entry);
+    } else {
+      cancelStatusPoll(entry.id);
+    }
+  } catch (error) {
+    cancelStatusPoll(entry.id);
+    entry.status = "error";
+    entry.error =
+      error instanceof Error ? error.message : "Unable to fetch slip status";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+  }
+}
+
+async function stageFile(entry) {
   entry.status = "processing";
   entry.error = "";
   renderQueue();
-  entry.file
-    .text()
-    .then((text) => {
-      entry.status = "ready";
-      entry.detection = {
-        id: entry.id,
-        name: entry.file.name,
-        size: entry.file.size,
-        preview: text.slice(0, 2000),
-      };
-      detectionStore.set(entry.id, entry.detection);
-      renderQueue();
-      updateApplyState();
-    })
-    .catch((error) => {
-      console.error("Unable to stage slip file", error);
-      entry.status = "error";
-      entry.error = "Unable to read file";
-      entry.detection = null;
-      detectionStore.delete(entry.id);
-      renderQueue();
-      updateApplyState();
+  if (!entry.file) {
+    entry.status = "error";
+    entry.error = "File data is unavailable";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+    return;
+  }
+  const uploadUrl = buildSlipUploadUrl();
+  if (!uploadUrl) {
+    entry.status = "error";
+    entry.error = "Select a profile and tax year before uploading";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+    return;
+  }
+  const formData = new FormData();
+  formData.append("upload", entry.file);
+  try {
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      body: formData,
     });
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      throw new Error("Invalid upload response");
+    }
+    if (!response.ok) {
+      const detail = data?.detail || `Upload failed (${response.status})`;
+      throw new Error(detail);
+    }
+    if (!data || typeof data !== "object" || !data.job_id) {
+      throw new Error("Upload did not return a job identifier");
+    }
+    applyJobStatus(entry, data);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+    if (entry.status === "processing") {
+      scheduleStatusPoll(entry);
+    } else {
+      cancelStatusPoll(entry.id);
+    }
+  } catch (error) {
+    cancelStatusPoll(entry.id);
+    console.error("Unable to stage slip file", error);
+    entry.status = "error";
+    entry.error =
+      error instanceof Error ? error.message : "Unable to process slip";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+  }
 }
 
 function updateApplyState() {
@@ -204,6 +498,66 @@ function updateApplyState() {
   const hasDetections = detectionStore.size > 0;
   applyButton.disabled = !hasDetections;
   applyButton.setAttribute("aria-disabled", String(!hasDetections));
+}
+
+function restoreQueueFromPersistence() {
+  const persisted = loadPersistedJobs();
+  if (!Array.isArray(persisted) || persisted.length === 0) {
+    persistQueueState();
+    return;
+  }
+  let highestCounter = queueCounter;
+  const entriesToPoll = [];
+  persisted.forEach((item) => {
+    if (!item || typeof item !== "object" || !item.jobId) {
+      return;
+    }
+    let entryId = typeof item.id === "string" && item.id ? item.id : "";
+    if (!entryId) {
+      highestCounter += 1;
+      entryId = `file-${highestCounter}`;
+    } else {
+      const match = entryId.match(/file-(\d+)/);
+      if (match) {
+        const value = Number.parseInt(match[1] || "", 10);
+        if (!Number.isNaN(value)) {
+          highestCounter = Math.max(highestCounter, value);
+        }
+      }
+    }
+    const fallbackName =
+      item.name || item.detection?.original_filename || item.jobId;
+    const storedSize =
+      typeof item.size === "number"
+        ? item.size
+        : typeof item.detection?.size === "number"
+          ? item.detection.size
+          : 0;
+    const entry = {
+      id: entryId,
+      key: `${fallbackName}:${storedSize}`,
+      file: null,
+      name: fallbackName,
+      size: storedSize,
+      status: item.status || "processing",
+      jobId: item.jobId,
+      detection: item.detection || null,
+      error: item.error || "",
+    };
+    if (entry.detection) {
+      entry.status = "ready";
+      detectionStore.set(entry.id, entry.detection);
+    } else if (entry.status !== "error") {
+      entry.status = "processing";
+      entriesToPoll.push(entry);
+    }
+    fileQueue.push(entry);
+  });
+  queueCounter = Math.max(queueCounter, highestCounter);
+  persistQueueState();
+  entriesToPoll.forEach((entry) => {
+    void pollJobStatus(entry);
+  });
 }
 
 function addFiles(files) {
@@ -217,13 +571,16 @@ function addFiles(files) {
       id: `file-${++queueCounter}`,
       key: dedupeKey,
       file,
+      name: file.name,
+      size: file.size,
       status: "queued",
       detection: null,
       error: "",
+      jobId: null,
     };
     fileQueue.push(entry);
     renderQueue();
-    stageFile(entry);
+    void stageFile(entry);
   });
   updateApplyState();
 }
@@ -290,10 +647,12 @@ function focusQueue(preferredIndex = 0) {
 function removeQueuedFile(entryId, options = {}) {
   const index = fileQueue.findIndex((entry) => entry.id === entryId);
   if (index === -1) return;
-  fileQueue.splice(index, 1);
+  const [entry] = fileQueue.splice(index, 1);
+  cancelStatusPoll(entryId);
   detectionStore.delete(entryId);
   renderQueue();
   updateApplyState();
+  persistQueueState();
   const preferredIndex =
     typeof options.preferredIndex === "number" ? options.preferredIndex : index;
   scheduleMicrotask(() => focusQueue(preferredIndex));
@@ -333,9 +692,22 @@ function registerEvents() {
   if (applyButton) {
     applyButton.addEventListener("click", applyDetections);
   }
+  if (formRoot) {
+    const taxYearField = formRoot.querySelector('input[name="tax_year"]');
+    if (taxYearField instanceof HTMLInputElement) {
+      const syncYear = () => {
+        if (!formRoot) return;
+        formRoot.dataset.activeYear = (taxYearField.value || "").trim();
+        persistQueueState();
+      };
+      taxYearField.addEventListener("input", syncYear);
+      taxYearField.addEventListener("change", syncYear);
+    }
+  }
 }
 
 function init() {
+  restoreQueueFromPersistence();
   syncExistingSlips();
   renderQueue();
   updateApplyState();

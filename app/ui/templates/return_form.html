@@ -273,6 +273,9 @@
       data-autosave-profile="{{ autosave_profile or '' }}"
       data-autosave-url="{{ autosave_url }}"
       data-autosave-interval="{{ autosave_interval }}"
+      data-active-profile="{{ autosave_profile or '' }}"
+      data-active-year="{{ form_state.tax_year or '' }}"
+      data-slip-jobs=""
     >
       <input type="hidden" name="current_step" id="current-step-field" value="{{ current_step }}" />
       <div class="stepper" role="tablist" aria-label="Return steps" data-stepper>
