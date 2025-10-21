@@ -158,9 +158,7 @@ def _friendly_profile_path(slug: str) -> str:
 
 
 def _form_text(val: Any) -> str:
-    """Return a safe text value from a form field which might be UploadFile | str | None."""
     if isinstance(val, StarletteUploadFile):
-        # For text fields, treat file inputs as empty string; or use filename if you prefer.
         return val.filename or ""
     if val is None:
         return ""
@@ -176,7 +174,6 @@ def _extract_form_data(form: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
             continue
         raw_value = form.get(field)
         if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
-            # If UploadFile, treat as empty too
             if isinstance(raw_value, StarletteUploadFile):
                 data[field] = None
                 continue
@@ -203,7 +200,7 @@ def _build_preview(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[st
         return None, messages
     try:
         result = estimate_from_t4(model)
-    except HTTPException as exc:  # pragma: no cover - should not occur with validated payload
+    except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         return None, [detail]
     return result, []
@@ -607,7 +604,6 @@ def _compute_return(req: ReturnInput):
 
 
 def _resolve_artifact_root(request: Request) -> Path:
-    # Ensure we only pass a valid str/PathLike to Path(), never Any|None.
     raw = getattr(request.app.state, "artifact_root", None)
     if raw is None:
         settings = getattr(request.app.state, "settings", None)
@@ -665,7 +661,6 @@ def profiles_home(request: Request) -> HTMLResponse:
 @router.post("/profiles", response_class=RedirectResponse)
 async def create_profile(request: Request) -> RedirectResponse:
     form = await request.form()
-    # Safely coerce text (mypy fix for UploadFile | str)
     name = _form_text(form.get("name")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
@@ -704,7 +699,6 @@ def restore(slug: str) -> RedirectResponse:
 @router.post("/profiles/{slug}/rename", response_class=RedirectResponse)
 async def rename(slug: str, request: Request) -> RedirectResponse:
     form = await request.form()
-    # Safely coerce text (mypy fix for UploadFile | str)
     new_name = _form_text(form.get("new_name")).strip()
     old_slug = slugify(slug)
     new_slug = slugify(new_name)
@@ -762,7 +756,6 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
         "format_currency": _format_currency,
     }
     if errors:
-        # Display field-level errors at the top of the preview
         pe = cast(list[str], context.setdefault("preview_errors", []))
         pe.extend(list(errors.values()))
     return TEMPLATES.TemplateResponse("preview.html", context)
@@ -783,7 +776,7 @@ def _render_return_form(request: Request, step: str | None) -> HTMLResponse:
             current_step = saved_step
         if saved_timestamp:
             messages.append(f"Loaded draft saved at {saved_timestamp}.")
-        autosave_url = request.url_for("ui_autosave_return")
+        autosave_url = str(request.url_for("ui_autosave_return"))
     context: dict[str, Any] = {
         "request": request,
         "form_state": form_state,
@@ -842,7 +835,7 @@ async def prepare_return(request: Request) -> HTMLResponse:
 
     settings = _resolve_settings(request)
     autosave_profile = get_active_profile()
-    autosave_url = request.url_for("ui_autosave_return") if autosave_profile else ""
+    autosave_url = str(request.url_for("ui_autosave_return")) if autosave_profile else ""
 
     messages: list[str] = []
     if payload is None:
