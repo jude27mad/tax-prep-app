@@ -38,6 +38,8 @@ PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
 
+# ----------------------------- Errors & Models -------------------------------
+
 class SlipUploadError(Exception):
     """Raised when an upload fails validation or ingestion."""
 
@@ -52,7 +54,6 @@ class SlipApplyError(Exception):
 
 class SlipDetection(BaseModel):
     """Structured payload returned to the UI for an ingested slip."""
-
     id: str
     slip_type: str
     original_filename: str
@@ -93,6 +94,8 @@ class _SlipJobRecord:
 class ApplyDetectionsRequest(BaseModel):
     detection_ids: list[str] | None = None
 
+
+# ----------------------------- In-memory Store -------------------------------
 
 class SlipStagingStore:
     """In-memory staging area for slip ingestion workflows."""
@@ -177,7 +180,7 @@ class SlipStagingStore:
             if not staged:
                 return []
 
-            results: list[SlipDetection]  # declare once for mypy
+            results: list[SlipDetection]
 
             if detection_ids is None:
                 results = list(staged.values())
@@ -207,7 +210,6 @@ _DEFAULT_STORE = SlipStagingStore()
 
 def resolve_store(app: Any | None = None) -> SlipStagingStore:
     """Return the staging store associated with the running app instance."""
-
     if app is None:
         return _DEFAULT_STORE
     store = getattr(app.state, "slip_staging_store", None)
@@ -217,6 +219,8 @@ def resolve_store(app: Any | None = None) -> SlipStagingStore:
     setattr(app.state, "slip_staging_store", store)
     return store
 
+
+# ------------------------------- Core ingest ---------------------------------
 
 async def _ingest_upload(
     detection_id: str,
@@ -260,6 +264,8 @@ async def _ingest_upload(
     )
 
 
+# ----------------------------- Helper functions ------------------------------
+
 def _resolve_extension(filename: str, content_type: str | None) -> str:
     extension = Path(filename).suffix.lower()
     if extension:
@@ -290,7 +296,7 @@ def _extract_text(extension: str, data: bytes) -> str:
 def _extract_text_from_pdf(data: bytes) -> str:
     try:
         tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    except OSError as exc:  # pragma: no cover - filesystem errors are rare
+    except OSError as exc:  # pragma: no cover
         raise SlipUploadError("Unable to stage PDF upload for processing") from exc
     try:
         with tmp_file:
@@ -301,25 +307,25 @@ def _extract_text_from_pdf(data: bytes) -> str:
         for page in reader.pages:
             try:
                 text = page.extract_text() or ""
-            except Exception as exc:  # pragma: no cover - library level errors
+            except Exception as exc:  # pragma: no cover
                 raise SlipUploadError("Unable to extract text from PDF page") from exc
             pages.append(text)
         return "\n".join(pages)
     except SlipUploadError:
         raise
-    except Exception as exc:  # pragma: no cover - defensive fallback
+    except Exception as exc:  # pragma: no cover
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
         try:
             Path(tmp_file.name).unlink()
-        except OSError:  # pragma: no cover - best effort cleanup
+        except OSError:  # pragma: no cover
             pass
 
 
 def _extract_text_from_image(data: bytes) -> str:
     try:
         from PIL import Image
-    except Exception as exc:  # pragma: no cover - Pillow is expected
+    except Exception as exc:  # pragma: no cover
         raise SlipUploadError("Image OCR requires Pillow to be installed") from exc
     try:
         import pytesseract  # type: ignore
@@ -330,7 +336,7 @@ def _extract_text_from_image(data: bytes) -> str:
     with Image.open(io.BytesIO(data)) as image:
         try:
             return pytesseract.image_to_string(image)
-        except Exception as exc:  # pragma: no cover - depends on OCR backend
+        except Exception as exc:  # pragma: no cover
             raise SlipUploadError("Unable to extract text from image upload") from exc
 
 
@@ -433,3 +439,50 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
 def _keyword_pattern(keyword: str) -> str:
     escaped = re.escape(keyword)
     return escaped.replace("\\ ", r"\s+")
+
+
+# ----------------------------- Public API (tests) ----------------------------
+
+async def ingest_slip_uploads(
+    profile: str,
+    year: int,
+    uploads: Iterable[UploadFile],
+    *,
+    settings: Settings,
+    app: Any | None = None,
+) -> list[SlipJobStatus]:
+    """
+    Batch-ingest one or more UploadFile items and return their job statuses.
+
+    This is the function tests import: tests/ui/test_slip_ingest.py
+    """
+    store = resolve_store(app)
+    statuses: list[SlipJobStatus] = []
+    for upload in uploads:
+        status = await store.process_upload(profile, year, upload, settings=settings)
+        statuses.append(status)
+    return statuses
+
+
+async def slip_job_status(
+    profile: str,
+    year: int,
+    job_id: str,
+    *,
+    app: Any | None = None,
+) -> SlipJobStatus:
+    """Helper to query a single job (thin wrapper used by tests/UIs)."""
+    store = resolve_store(app)
+    return await store.job_status(profile, year, job_id)
+
+
+async def apply_staged_detections(
+    profile: str,
+    year: int,
+    detection_ids: Iterable[str] | None = None,
+    *,
+    app: Any | None = None,
+) -> list[SlipDetection]:
+    """Apply selected (or all) staged detections into the draft layer."""
+    store = resolve_store(app)
+    return await store.apply(profile, year, detection_ids)
