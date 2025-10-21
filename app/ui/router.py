@@ -733,11 +733,13 @@ def _t183_consent_context(
     display_name = " ".join(part for part in [first, last] if part)
     sin = str(taxpayer_state.get("sin", "") or "").strip()
     tax_year = state.get("tax_year") if isinstance(state, dict) else ""
-    # 736–739
+
+    # Safely coerce tax_year to text for display
     try:
-    tax_year_text = str(int(cast(int | str, tax_year)))
+        tax_year_text = str(int(cast(int | str, tax_year)))
     except (TypeError, ValueError):
-    tax_year_text = str(tax_year or "")
+        tax_year_text = str(tax_year or "")
+
     context: dict[str, Any] = {
         "request": request,
         "profile_slug": normalized,
@@ -885,13 +887,14 @@ async def _persist_t183_consent(
 ) -> tuple[Any, Path, Path, Path]:
     retention_root = _t183_retention_root(request)
     retention_root.mkdir(parents=True, exist_ok=True)
-    # 887–892
-tax_year_raw = state.get("tax_year") if isinstance(state, dict) else None
-try:
-    tax_year = int(cast(int | str, tax_year_raw))
-except (TypeError, ValueError):
-    raise HTTPException(status_code=400, detail="Unable to determine tax year for consent")
-last_four = sin[-4:]
+
+    tax_year_raw = state.get("tax_year") if isinstance(state, dict) else None
+    try:
+        tax_year = int(cast(int | str, tax_year_raw))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Unable to determine tax year for consent")
+
+    last_four = sin[-4:]
     target_dir = retention_root / f"{tax_year}" / last_four
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = int(datetime.now(timezone.utc).timestamp())
@@ -916,6 +919,7 @@ last_four = sin[-4:]
         "Attestation:",
         form_data.get("attestation_text", ""),
     ]
+    summary_path = target_dir / f"t183_{timestamp}.txt"
     summary_path.write_text("\n".join(line for line in summary_lines if line is not None), encoding="utf-8")
 
     ip_hash = _hash_metadata_value(form_data.get("ip"))
@@ -936,6 +940,7 @@ last_four = sin[-4:]
         original_sin=sin,
     )
     encrypted_path = Path(encrypted_path_str)
+    meta_path = target_dir / f"{encrypted_path.stem}.json"
     metadata = {
         "profile": slug,
         "tax_year": tax_year,
@@ -1305,4 +1310,3 @@ def download_artifact(request: Request, path: str) -> FileResponse:
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(candidate)
-
