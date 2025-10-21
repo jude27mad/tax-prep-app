@@ -69,6 +69,91 @@
       margin-bottom: 1rem;
       background: #f9fafb;
     }
+    .slip-import {
+      border: 1px solid #cbd5f5;
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin-bottom: 1.25rem;
+      background: #eef2ff;
+    }
+    .slip-import .field-help {
+      margin-top: 0.75rem;
+      color: #334155;
+    }
+    .dropzone {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      border: 2px dashed #6366f1;
+      border-radius: 0.65rem;
+      padding: 1rem 1.25rem;
+      background: white;
+      cursor: pointer;
+      outline: none;
+    }
+    .dropzone:focus-visible {
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.45);
+    }
+    .dropzone.is-dragover {
+      background: #e0e7ff;
+      border-style: solid;
+    }
+    .dropzone .dropzone-content {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.95rem;
+    }
+    .dropzone .dropzone-actions {
+      display: flex;
+    }
+    .dropzone .dropzone-actions .btn {
+      pointer-events: none;
+    }
+    .file-queue {
+      margin: 0.75rem 0 0;
+      padding: 0;
+      list-style: none;
+      border: 1px solid #cbd5f5;
+      border-radius: 0.6rem;
+      background: white;
+    }
+    .file-queue[hidden] {
+      display: none;
+    }
+    .file-queue li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid #e5e7eb;
+      gap: 0.75rem;
+    }
+    .file-queue li:last-child {
+      border-bottom: none;
+    }
+    .file-queue .file-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+    }
+    .file-queue .file-status {
+      font-size: 0.8rem;
+      color: #475569;
+    }
+    .file-queue .file-status.ready {
+      color: #166534;
+    }
+    .file-queue .file-status.error {
+      color: #b91c1c;
+    }
+    .queue-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 0.75rem;
+    }
     .slip-header {
       display: flex;
       justify-content: space-between;
@@ -223,6 +308,46 @@
 
       <section>
         <div class="section-heading">T4 slips</div>
+        <div class="slip-import">
+          <div
+            id="t4-slip-dropzone"
+            class="dropzone"
+            role="button"
+            tabindex="0"
+            aria-controls="t4-file-queue"
+            aria-describedby="t4-slip-dropzone-help"
+            data-dropzone
+          >
+            <div class="dropzone-content">
+              <strong>Import slip files</strong>
+              <span>Drag and drop PDFs or images, or press Enter to browse.</span>
+            </div>
+            <div class="dropzone-actions">
+              <span class="btn secondary" aria-hidden="true">Browse files</span>
+            </div>
+          </div>
+          <input
+            id="t4-slip-file-input"
+            type="file"
+            accept=".pdf,image/*"
+            multiple
+            hidden
+          />
+          <p id="t4-slip-dropzone-help" class="field-help">
+            Upload slip images or PDFs and queue them for detection before applying the results.
+          </p>
+          <div class="queue-wrapper" aria-live="polite">
+            <ul
+              id="t4-file-queue"
+              class="file-queue"
+              role="list"
+              aria-label="Queued slip files"
+            ></ul>
+          </div>
+          <div class="queue-actions">
+            <button type="button" id="apply-detections" class="btn" disabled>Apply detections</button>
+          </div>
+        </div>
         <div id="t4-slips">
           {% for slip in form_state.slips_t4 %}
             <div class="slip-wrapper t4-slip" data-slip-index="{{ slip.index }}">
@@ -458,8 +583,6 @@
 
   <script>
     const form = document.getElementById("return-form");
-    const slipContainer = document.getElementById("t4-slips");
-    const slipTemplate = document.getElementById("t4-slip-template");
     const prepareResults = document.getElementById("prepare-results");
     const prepareStatus = document.getElementById("prepare-status-message");
     const issuesBox = document.getElementById("prepare-issues");
@@ -470,7 +593,6 @@
     const efileStatus = document.getElementById("efile-status");
     const artifactSection = document.getElementById("artifact-section");
     const artifactList = document.getElementById("artifact-list");
-    const addSlipButton = document.getElementById("add-slip");
     const printButton = document.getElementById("print-button");
     const efileButton = document.getElementById("efile-button");
     const efileAvailabilityNote = document.getElementById("efile-availability-note");
@@ -485,18 +607,6 @@
         console.warn("Unable to parse transmit gate data", err);
       }
     }
-
-    let nextSlipIndex = 0;
-    document.querySelectorAll(".t4-slip").forEach((node) => {
-      const idx = Number.parseInt(node.dataset.slipIndex || "0", 10);
-      if (!Number.isNaN(idx) && idx >= nextSlipIndex) {
-        nextSlipIndex = idx + 1;
-      }
-      const numberSpan = node.querySelector(".slip-number");
-      if (numberSpan) {
-        numberSpan.textContent = idx + 1;
-      }
-    });
 
     function setStatus(box, message, variant = "") {
       box.textContent = message;
@@ -550,56 +660,6 @@
       issuesBox.appendChild(list);
       issuesBox.hidden = false;
     }
-
-    function addSlip(index) {
-      const clone = slipTemplate.content.cloneNode(true);
-      clone.querySelectorAll("[name]").forEach((input) => {
-        const name = input.getAttribute("name");
-        if (!name) return;
-        input.setAttribute("name", name.replace(/__index__/g, String(index)));
-      });
-      const wrapper = clone.querySelector(".t4-slip");
-      if (wrapper) {
-        wrapper.dataset.slipIndex = String(index);
-        const numberSpan = wrapper.querySelector(".slip-number");
-        if (numberSpan) {
-          numberSpan.textContent = index + 1;
-        }
-      }
-      slipContainer.appendChild(clone);
-      updateRemoveButtons();
-    }
-
-    function updateRemoveButtons() {
-      const slips = slipContainer.querySelectorAll(".t4-slip");
-      const disable = slips.length === 1;
-      slips.forEach((wrapper) => {
-        const button = wrapper.querySelector(".remove-slip");
-        if (button) {
-          button.disabled = disable;
-        }
-        const numberSpan = wrapper.querySelector(".slip-number");
-        if (numberSpan) {
-          const idx = Number.parseInt(wrapper.dataset.slipIndex || "0", 10);
-          numberSpan.textContent = idx + 1;
-        }
-      });
-    }
-
-    addSlipButton?.addEventListener("click", () => {
-      addSlip(nextSlipIndex++);
-    });
-
-    slipContainer.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
-      if (!target.classList.contains("remove-slip")) return;
-      const wrapper = target.closest(".t4-slip");
-      if (!wrapper) return;
-      if (slipContainer.querySelectorAll(".t4-slip").length === 1) return;
-      wrapper.remove();
-      updateRemoveButtons();
-    });
 
     function formValue(name) {
       const field = form.elements.namedItem(name);
@@ -837,7 +897,7 @@
     efileButton?.addEventListener("click", handleEfile);
     taxYearField?.addEventListener("input", updateEfileAvailability);
     taxYearField?.addEventListener("change", updateEfileAvailability);
-    updateRemoveButtons();
     updateEfileAvailability();
   </script>
+  <script type="module" src="{{ url_for('ui_static', path='js/return_form.js') }}"></script>
 {% endblock %}
