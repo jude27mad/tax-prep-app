@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="card">
+    <a href="/ui/profiles/{{ profile_slug }}">← Back to profile</a>
+    <h2>Form T183 electronic authorization</h2>
+    <p>
+      {% if taxpayer_name %}{{ taxpayer_name }}{% else %}Client{% endif %}
+      — Tax year {{ tax_year or "current" }}
+    </p>
+    <p><strong>Social Insurance Number:</strong> {{ masked_sin }}</p>
+    <p style="font-size:0.95rem; color:#4b5563;">
+      Your signature authorizes Tax App to transmit your income tax return to the Canada Revenue Agency.
+      We capture the signing time, your network address, and browser details and retain them for {{ retention_years }} years as required by CRA.
+      These device details are hashed before storage.
+    </p>
+
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if errors.get('sin') %}
+      <div style="margin-bottom:1rem; padding:0.75rem; border:1px solid #b91c1c; color:#b91c1c; border-radius:0.4rem;">
+        {{ errors.get('sin') }} Please return to the profile and enter the SIN before continuing.
+      </div>
+    {% endif %}
+
+    <form method="post">
+      <fieldset style="border:none; padding:0; margin:0 0 1.5rem 0;">
+        <legend style="font-weight:600; margin-bottom:0.5rem;">Consent overview</legend>
+        <p style="margin-top:0;">
+          By signing below you confirm that you have reviewed your tax return, authorize Tax App to file it on your behalf,
+          and will provide supporting documentation to the CRA upon request.
+        </p>
+        <p style="margin-bottom:0; font-size:0.9rem; color:#4b5563;">
+          Captured IP: <code>{{ ip_address or 'unknown' }}</code><br />
+          User agent preview: <code>{{ user_agent }}</code>
+        </p>
+      </fieldset>
+
+      <div style="margin-bottom:1rem;">
+        <label for="attestation_text" style="display:block; font-weight:600;">Attestation wording</label>
+        <textarea id="attestation_text" name="attestation_text" rows="4" style="width:100%; font:inherit; padding:0.5rem; border-radius:0.4rem; border:1px solid #d1d5db;">{{ default_attestation }}</textarea>
+      </div>
+
+      <div style="margin-bottom:1rem;">
+        <label for="signature" style="display:block; font-weight:600;">Type your full name to sign</label>
+        <input id="signature" name="signature" type="text" value="{{ form.signature or '' }}" required style="width:100%; padding:0.5rem; border:1px solid #d1d5db; border-radius:0.4rem;" />
+        {% if errors.get('signature') %}
+          <div style="color:#b91c1c; font-size:0.85rem; margin-top:0.25rem;">{{ errors.get('signature') }}</div>
+        {% endif %}
+      </div>
+
+      <div style="margin-bottom:1.5rem;">
+        <label style="display:flex; gap:0.5rem; align-items:flex-start;">
+          <input type="checkbox" name="confirm" value="on" {% if form.confirm in ['on','true','1'] %}checked{% endif %} required />
+          <span>I confirm that I am the taxpayer identified above and I authorize Tax App to transmit my Form T1 return using Form T183.</span>
+        </label>
+        {% if errors.get('confirm') %}
+          <div style="color:#b91c1c; font-size:0.85rem; margin-top:0.25rem;">{{ errors.get('confirm') }}</div>
+        {% endif %}
+      </div>
+
+      <div>
+        <button type="submit" class="btn" {% if not has_valid_sin %}disabled{% endif %}>Sign and capture consent</button>
+      </div>
+    </form>
+  </div>
+{% endblock %}
