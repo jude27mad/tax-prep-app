@@ -176,19 +176,24 @@ class SlipStagingStore:
             staged = self._staged.get(bucket)
             if not staged:
                 return []
+
+            results: list[SlipDetection]  # declare once for mypy
+
             if detection_ids is None:
-                result = list(staged.values())
+                results = list(staged.values())
                 self._staged.pop(bucket, None)
-                return result
-            result: list[SlipDetection] = []
+                return results
+
+            results = []
             for detection_id in detection_ids:
                 detection = staged.pop(detection_id, None)
                 if detection is None:
                     raise SlipApplyError(f"Detection {detection_id} not found for profile")
-                result.append(detection)
+                results.append(detection)
+
             if not staged:
                 self._staged.pop(bucket, None)
-            return result
+            return results
 
     async def clear(self, profile: str, year: int) -> None:
         safe_profile = slugify(profile) or "default"
