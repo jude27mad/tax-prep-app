@@ -6,6 +6,34 @@ const fileInput = document.getElementById("t4-slip-file-input");
 const queueList = document.getElementById("t4-file-queue");
 const applyButton = document.getElementById("apply-detections");
 
+const formRoot = document.getElementById("return-form");
+const stepper = formRoot?.querySelector("[data-stepper]") ?? null;
+const stepButtons = stepper
+  ? Array.from(stepper.querySelectorAll("button[data-step]"))
+  : [];
+const stepPanels = formRoot
+  ? Array.from(formRoot.querySelectorAll("[data-step-panel]"))
+  : [];
+const currentStepField = document.getElementById("current-step-field");
+const autosaveUrl = formRoot?.dataset.autosaveUrl || "";
+const autosaveProfile = formRoot?.dataset.autosaveProfile || "";
+const autosaveIntervalAttr = formRoot?.dataset.autosaveInterval || "";
+const autosaveIntervalParsed = Number.parseInt(autosaveIntervalAttr || "", 10);
+const autosaveIntervalMs = Number.isNaN(autosaveIntervalParsed)
+  ? 20000
+  : autosaveIntervalParsed;
+const initialStep =
+  formRoot?.dataset.currentStep ||
+  formRoot?.dataset.initialStep ||
+  stepButtons[0]?.dataset.step ||
+  "identity";
+let currentStep = initialStep;
+
+const autosaveEnabled = Boolean(formRoot && autosaveUrl && autosaveProfile);
+let autosaveDirty = false;
+let autosavePending = false;
+let autosaveTimerId;
+
 let nextSlipIndex = 0;
 let queueCounter = 0;
 const fileQueue = [];
@@ -314,6 +342,233 @@ function init() {
   registerEvents();
 }
 
+function normalizedStep(step) {
+  if (stepButtons.length === 0) {
+    return "identity";
+  }
+  if (typeof step === "string" && step) {
+    const match = stepButtons.find((button) => button.dataset.step === step);
+    if (match?.dataset.step) {
+      return match.dataset.step;
+    }
+  }
+  return stepButtons[0]?.dataset.step || "identity";
+}
+
+function setStepperState(step, options = {}) {
+  if (!formRoot || stepButtons.length === 0 || stepPanels.length === 0) {
+    return;
+  }
+  const normalized = normalizedStep(step);
+  currentStep = normalized;
+  formRoot.dataset.currentStep = normalized;
+  if (currentStepField) {
+    currentStepField.value = normalized;
+  }
+  stepButtons.forEach((button) => {
+    const isActive = button.dataset.step === normalized;
+    button.setAttribute("aria-selected", String(isActive));
+    button.tabIndex = isActive ? 0 : -1;
+    if (isActive && options.focus) {
+      button.focus();
+    }
+  });
+  stepPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.stepPanel !== normalized;
+  });
+  const event = new CustomEvent("return-form-stepchange", {
+    bubbles: true,
+    detail: { step: normalized },
+  });
+  formRoot.dispatchEvent(event);
+  if (options.updateUrl && typeof window !== "undefined") {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("step", normalized);
+      window.history.replaceState({ step: normalized }, "", url);
+    } catch (error) {
+      console.warn("Unable to update step URL", error);
+    }
+  }
+}
+
+function stepIndex(value) {
+  return stepButtons.findIndex((button) => button.dataset.step === value);
+}
+
+function handleStepperClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.matches("button[data-step]")) return;
+  const step = target.dataset.step;
+  if (!step) return;
+  setStepperState(step, { focus: false, updateUrl: true });
+}
+
+function handleStepperKeydown(event) {
+  if (!stepButtons.length) return;
+  const key = event.key;
+  const horizontal = ["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"].includes(key);
+  const positional = key === "Home" || key === "End";
+  if (!horizontal && !positional) {
+    return;
+  }
+  event.preventDefault();
+  let index = stepIndex(currentStep);
+  if (index === -1) {
+    index = 0;
+  }
+  if (key === "ArrowRight" || key === "ArrowDown") {
+    index = (index + 1) % stepButtons.length;
+  } else if (key === "ArrowLeft" || key === "ArrowUp") {
+    index = (index - 1 + stepButtons.length) % stepButtons.length;
+  } else if (key === "Home") {
+    index = 0;
+  } else if (key === "End") {
+    index = stepButtons.length - 1;
+  }
+  const step = stepButtons[index]?.dataset.step;
+  if (step) {
+    setStepperState(step, { focus: true, updateUrl: true });
+  }
+}
+
+function setupStepper() {
+  if (!formRoot || !stepper || stepButtons.length === 0) {
+    return;
+  }
+  stepper.addEventListener("click", handleStepperClick);
+  stepper.addEventListener("keydown", handleStepperKeydown);
+  if (typeof window !== "undefined") {
+    window.addEventListener("popstate", (event) => {
+      const stateStep = event.state?.step;
+      let nextStep = typeof stateStep === "string" ? stateStep : null;
+      if (!nextStep) {
+        try {
+          const url = new URL(window.location.href);
+          nextStep = url.searchParams.get("step");
+        } catch (error) {
+          nextStep = null;
+        }
+      }
+      setStepperState(nextStep, { focus: false, updateUrl: false });
+    });
+  }
+  let initial = currentStep;
+  if (typeof window !== "undefined") {
+    try {
+      const url = new URL(window.location.href);
+      const queryStep = url.searchParams.get("step");
+      if (queryStep) {
+        initial = queryStep;
+      }
+    } catch (error) {
+      // Ignore malformed URLs
+    }
+  }
+  setStepperState(initial, { focus: false, updateUrl: false });
+}
+
+function markAutosaveDirty() {
+  if (!autosaveEnabled) return;
+  autosaveDirty = true;
+}
+
+async function performAutosave() {
+  if (!autosaveEnabled) return;
+  if (!autosaveDirty || autosavePending) {
+    scheduleAutosave();
+    return;
+  }
+  const api = typeof window !== "undefined" ? window.__returnForm : null;
+  if (!api || typeof api.collectFormState !== "function") {
+    scheduleAutosave();
+    return;
+  }
+  const payload = {
+    profile: autosaveProfile,
+    step: currentStep,
+    state: api.collectFormState(),
+  };
+  autosavePending = true;
+  try {
+    const response = await fetch(autosaveUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(`Autosave failed: ${response.status}`);
+    }
+    autosaveDirty = false;
+  } catch (error) {
+    console.warn("Autosave error", error);
+  } finally {
+    autosavePending = false;
+    scheduleAutosave();
+  }
+}
+
+function scheduleAutosave() {
+  if (!autosaveEnabled) return;
+  if (autosaveTimerId) {
+    clearTimeout(autosaveTimerId);
+  }
+  autosaveTimerId = setTimeout(() => {
+    void performAutosave();
+  }, autosaveIntervalMs);
+}
+
+function flushAutosave() {
+  if (!autosaveEnabled || !autosaveDirty) return;
+  const api = typeof window !== "undefined" ? window.__returnForm : null;
+  if (!api || typeof api.collectFormState !== "function") {
+    return;
+  }
+  const payload = {
+    profile: autosaveProfile,
+    step: currentStep,
+    state: api.collectFormState(),
+  };
+  if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    navigator.sendBeacon(autosaveUrl, blob);
+    autosaveDirty = false;
+  }
+}
+
+function setupAutosave() {
+  if (!autosaveEnabled || !formRoot) {
+    return;
+  }
+  const markAndSchedule = () => {
+    markAutosaveDirty();
+    scheduleAutosave();
+  };
+  formRoot.addEventListener("input", markAndSchedule, true);
+  formRoot.addEventListener("change", markAndSchedule, true);
+  formRoot.addEventListener("return-form-stepchange", markAndSchedule);
+  formRoot.addEventListener("submit", () => {
+    markAutosaveDirty();
+    flushAutosave();
+  });
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        void performAutosave();
+      }
+    });
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", () => {
+      flushAutosave();
+    });
+  }
+  scheduleAutosave();
+}
+
 init();
+setupStepper();
+setupAutosave();
 
 export { removeQueuedFile, focusQueue, applyDetections };
