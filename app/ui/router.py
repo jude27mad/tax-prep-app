@@ -38,7 +38,21 @@ from app.wizard import (
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
-TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+UI_ROOT = Path(__file__).resolve().parent
+TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
+STATIC_ROOT = UI_ROOT / "static"
+
+
+@router.get("/static/{path:path}", name="ui_static")
+async def serve_ui_static(path: str) -> FileResponse:
+    target_path = (STATIC_ROOT / path).resolve()
+    try:
+        target_path.relative_to(STATIC_ROOT.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Static asset not found") from exc
+    if not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Static asset not found")
+    return FileResponse(target_path)
 
 
 FIELD_METADATA: dict[str, dict[str, Any]] = {
