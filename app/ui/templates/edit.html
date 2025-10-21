@@ -91,4 +91,52 @@
       </div>
     </div>
   </div>
+
+  <div class="card">
+    <h3>T183 authorizations</h3>
+    <p>
+      Captured consent records are retained for {{ t183_info.retention_years if t183_info and t183_info.retention_years else retention_years if retention_years else 6 }} years per CRA policy.
+      <a href="/ui/profiles/{{ profile_slug }}/t183" class="btn" style="margin-left:0.5rem;">Open consent page</a>
+    </p>
+    {% if t183_info.masked_sin %}
+      <p>Masked SIN: {{ t183_info.masked_sin }}</p>
+    {% endif %}
+    {% if t183_info.sin_invalid %}
+      <p style="color:#b91c1c;">Enter a valid SIN in the return draft to enable retention tracking.</p>
+    {% endif %}
+    {% if t183_records %}
+      <table class="striped">
+        <thead>
+          <tr>
+            <th>Record</th>
+            <th>Signed</th>
+            <th>Tax year</th>
+            <th>IP hash</th>
+            <th>User agent hash</th>
+            <th>Download</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in t183_records %}
+            <tr>
+              <td>{{ record.record_id }}</td>
+              <td>{{ record.signed_at or 'Unknown' }}</td>
+              <td>{{ record.tax_year }}</td>
+              <td>{{ record.ip_hash or '—' }}</td>
+              <td>{{ record.user_agent_hash or '—' }}</td>
+              <td>
+                {% if record.download_url %}
+                  <a href="{{ record.download_url }}" class="btn">Encrypted blob</a>
+                {% else %}
+                  <span style="color:#4b5563;">Unavailable</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No stored electronic authorizations yet.</p>
+    {% endif %}
+  </div>
 {% endblock %}

@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import ValidationError
-from starlette.datastructures import UploadFile  # for type-narrowing form inputs
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from starlette.datastructures import UploadFile as StarletteUploadFile  # for type-narrowing form inputs
 
 from app.config import Settings, get_settings
 from app.core.models import ReturnInput
 from app.core.validate.pre_submit import validate_return_input
 from app.efile.gating import build_transmit_gate
+from app.efile.t183 import RETENTION_YEARS, build_record, mask_sin, store_signed
+from app.ui import slip_ingest
 from app.wizard import (
     BASE_DIR,
     CLI_BOOL_FIELDS,
@@ -35,11 +38,37 @@ from app.wizard import (
     set_active_profile,
     slugify,
 )
-from .slip_ingest import SlipDetection, ingest_slip_uploads
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
-TEMPLATES = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+UI_ROOT = Path(__file__).resolve().parent
+TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
+STATIC_ROOT = UI_ROOT / "static"
+PROFILE_DRAFTS_ROOT = BASE_DIR / "profiles"
+
+FORM_STEPS: list[dict[str, str]] = [
+    {"slug": "identity", "label": "Identity"},
+    {"slug": "slips", "label": "Slips"},
+    {"slug": "deductions", "label": "Deductions"},
+    {"slug": "review", "label": "Review"},
+    {"slug": "transmit", "label": "Print/Transmit"},
+]
+FORM_STEP_SLUGS = {step["slug"] for step in FORM_STEPS}
+DEFAULT_FORM_STEP = FORM_STEPS[0]["slug"]
+AUTOSAVE_INTERVAL_MS = 20000
+T183_RETENTION_DIRNAME = "t183"
+
+
+@router.get("/static/{path:path}", name="ui_static")
+async def serve_ui_static(path: str) -> FileResponse:
+    target_path = (STATIC_ROOT / path).resolve()
+    try:
+        target_path.relative_to(STATIC_ROOT.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Static asset not found") from exc
+    if not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Static asset not found")
+    return FileResponse(target_path)
 
 
 FIELD_METADATA: dict[str, dict[str, Any]] = {
@@ -132,9 +161,7 @@ def _friendly_profile_path(slug: str) -> str:
 
 
 def _form_text(val: Any) -> str:
-    """Return a safe text value from a form field which might be UploadFile | str | None."""
-    if isinstance(val, UploadFile):
-        # For text fields, treat file inputs as empty string; or use filename if you prefer.
+    if isinstance(val, StarletteUploadFile):
         return val.filename or ""
     if val is None:
         return ""
@@ -150,8 +177,7 @@ def _extract_form_data(form: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
             continue
         raw_value = form.get(field)
         if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
-            # If UploadFile, treat as empty too
-            if isinstance(raw_value, UploadFile):
+            if isinstance(raw_value, StarletteUploadFile):
                 data[field] = None
                 continue
             data[field] = None
@@ -177,7 +203,7 @@ def _build_preview(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[st
         return None, messages
     try:
         result = estimate_from_t4(model)
-    except HTTPException as exc:  # pragma: no cover - should not occur with validated payload
+    except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         return None, [detail]
     return result, []
@@ -194,6 +220,12 @@ def _profile_messages(request: Request) -> list[str]:
         messages.append("Profile restored from trash.")
     if params.get("renamed") == "1":
         messages.append("Profile renamed.")
+    if params.get("t183_signed") == "1":
+        record_id = params.get("record")
+        if record_id:
+            messages.append(f"T183 authorization recorded (ID {record_id}).")
+        else:
+            messages.append("T183 authorization recorded.")
     return messages
 
 
@@ -272,6 +304,8 @@ def _default_return_form_state() -> dict[str, Any]:
             "ip_hash": "",
             "user_agent_hash": "",
             "pdf_path": "",
+            "record_path": "",
+            "metadata_path": "",
         },
         "outputs": {
             "out_path": "artifacts/printouts/t1.pdf",
@@ -283,6 +317,149 @@ def _default_return_form_state() -> dict[str, Any]:
             "transmitter_id": "",
         },
     }
+
+
+def _normalize_step(step: str | None) -> str:
+    if not step:
+        return DEFAULT_FORM_STEP
+    candidate = str(step).strip().lower()
+    if candidate in FORM_STEP_SLUGS:
+        return candidate
+    return DEFAULT_FORM_STEP
+
+
+def _profile_draft_dir(slug: str) -> Path:
+    return (PROFILE_DRAFTS_ROOT / slug).resolve()
+
+
+def _profile_draft_path(slug: str) -> Path:
+    return _profile_draft_dir(slug) / "draft.json"
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _coerce_slip_state(entry: dict[str, Any], fallback_index: int) -> dict[str, Any]:
+    slip = _blank_slip_state(fallback_index)
+    index_value = entry.get("index", fallback_index)
+    try:
+        slip_index = int(index_value)
+    except (TypeError, ValueError):
+        slip_index = fallback_index
+    slip["index"] = slip_index
+    for key in (
+        "employment_income",
+        "tax_deducted",
+        "cpp_contrib",
+        "ei_premiums",
+        "pensionable_earnings",
+        "insurable_earnings",
+    ):
+        slip[key] = _coerce_text(entry.get(key))
+    return slip
+
+
+def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
+    state = base
+    taxpayer_saved = saved.get("taxpayer")
+    if isinstance(taxpayer_saved, dict):
+        for key in state["taxpayer"].keys():
+            state["taxpayer"][key] = _coerce_text(taxpayer_saved.get(key))
+    household_saved = saved.get("household")
+    if isinstance(household_saved, dict):
+        state["household"]["marital_status"] = _coerce_text(household_saved.get("marital_status"))
+        state["household"]["spouse_sin"] = _coerce_text(household_saved.get("spouse_sin"))
+        state["household"]["dependants_raw"] = _coerce_text(household_saved.get("dependants_raw"))
+    slips_saved = saved.get("slips_t4")
+    if isinstance(slips_saved, list):
+        slips: list[dict[str, Any]] = []
+        for position, entry in enumerate(slips_saved):
+            if isinstance(entry, dict):
+                slips.append(_coerce_slip_state(entry, position))
+        if slips:
+            state["slips_t4"] = slips
+    if "rrsp_contrib" in saved:
+        state["rrsp_contrib"] = _coerce_text(saved.get("rrsp_contrib"))
+    if "province" in saved:
+        state["province"] = _coerce_text(saved.get("province"))
+    if "tax_year" in saved:
+        state["tax_year"] = _coerce_text(saved.get("tax_year"))
+    t183_saved = saved.get("t183")
+    if isinstance(t183_saved, dict):
+        for key in state["t183"].keys():
+            state["t183"][key] = _coerce_text(t183_saved.get(key))
+    outputs_saved = saved.get("outputs")
+    if isinstance(outputs_saved, dict) and "out_path" in outputs_saved:
+        state["outputs"]["out_path"] = _coerce_text(outputs_saved.get("out_path"))
+    efile_saved = saved.get("efile")
+    if isinstance(efile_saved, dict):
+        for key in state["efile"].keys():
+            state["efile"][key] = _coerce_text(efile_saved.get(key))
+    return state
+
+
+def _load_return_draft(slug: str) -> tuple[dict[str, Any], str | None, str | None, bool]:
+    path = _profile_draft_path(slug)
+    if not path.exists():
+        return {}, None, None, False
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, None, None, False
+    state_data = raw.get("state") or raw.get("form_state")
+    state: dict[str, Any] = {}
+    has_state = isinstance(state_data, dict)
+    if has_state:
+        state = _merge_return_form_state(_default_return_form_state(), state_data)
+    step_value = raw.get("step") if isinstance(raw.get("step"), str) else None
+    normalized_step = _normalize_step(step_value) if step_value else None
+    updated_at_raw = raw.get("updated_at")
+    timestamp = str(updated_at_raw) if isinstance(updated_at_raw, str) else None
+    return state, normalized_step, timestamp, has_state
+
+
+def _save_return_draft(slug: str, state: dict[str, Any], step: str) -> None:
+    directory = _profile_draft_dir(slug)
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "state": state,
+        "step": step,
+        "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }
+    path = _profile_draft_path(slug)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+class ReturnAutosavePayload(BaseModel):
+    profile: str = Field(..., min_length=1)
+    step: str = Field(..., min_length=1)
+    state: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("profile")
+    @classmethod
+    def validate_profile(cls, value: str) -> str:
+        slug = slugify(value)
+        if not slug:
+            raise ValueError("Invalid profile identifier")
+        return slug
+
+    @field_validator("step")
+    @classmethod
+    def validate_step(cls, value: str) -> str:
+        candidate = str(value).strip().lower()
+        if candidate not in FORM_STEP_SLUGS:
+            raise ValueError("Invalid step")
+        return candidate
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("State must be an object")
+        return value
 
 
 def _normalize_datetime_field(value: str) -> str | None:
@@ -438,7 +615,6 @@ def _compute_return(req: ReturnInput):
 
 
 def _resolve_artifact_root(request: Request) -> Path:
-    # Ensure we only pass a valid str/PathLike to Path(), never Any|None.
     raw = getattr(request.app.state, "artifact_root", None)
     if raw is None:
         settings = getattr(request.app.state, "settings", None)
@@ -450,6 +626,141 @@ def _resolve_artifact_root(request: Request) -> Path:
     if not root_path.is_absolute():
         root_path = (BASE_DIR / root_path).resolve()
     return root_path
+
+
+def _t183_retention_root(request: Request) -> Path:
+    root = _resolve_artifact_root(request) / T183_RETENTION_DIRNAME
+    return root
+
+
+def _hash_metadata_value(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _collect_t183_records(request: Request, slug: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    state, _, _, has_state = _load_return_draft(slug)
+    info: dict[str, Any] = {
+        "has_state": has_state,
+        "masked_sin": None,
+        "sin": None,
+        "tax_year": None,
+        "t183_state": {},
+        "sin_invalid": False,
+        "retention_years": RETENTION_YEARS,
+    }
+    records: list[dict[str, Any]] = []
+    if not has_state:
+        return records, info
+    taxpayer_state = state.get("taxpayer", {}) if isinstance(state, dict) else {}
+    sin = str(taxpayer_state.get("sin", "") or "").strip()
+    info["sin"] = sin
+    info["masked_sin"] = mask_sin(sin)
+    info["tax_year"] = state.get("tax_year") if isinstance(state, dict) else None
+    t183_state = state.get("t183") if isinstance(state, dict) else None
+    if isinstance(t183_state, dict):
+        info["t183_state"] = t183_state
+    if not sin or len(sin) != 9 or not sin.isdigit():
+        info["sin_invalid"] = True
+        return records, info
+    retention_root = _t183_retention_root(request)
+    if not retention_root.exists():
+        return records, info
+    last_four = sin[-4:]
+    for year_dir in sorted(retention_root.iterdir()):
+        if not year_dir.is_dir():
+            continue
+        target_dir = year_dir / last_four
+        if not target_dir.exists() or not target_dir.is_dir():
+            continue
+        for meta_path in sorted(target_dir.glob("t183_*.json"), reverse=True):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):  # pragma: no cover - corrupt metadata skipped
+                continue
+            profile_ref = meta.get("profile")
+            if profile_ref and profile_ref != slug:
+                continue
+            record_id = meta.get("record_id") or meta_path.stem
+            encrypted_path = meta.get("encrypted_path") or str(meta_path.with_suffix(".enc"))
+            summary_path = meta.get("summary_path")
+            signed_at = meta.get("signed_at")
+            filed_at = meta.get("filed_at")
+            esign_at = meta.get("esign_accepted_at")
+            record: dict[str, Any] = {
+                "record_id": record_id,
+                "tax_year": meta.get("tax_year") or year_dir.name,
+                "signed_at": signed_at,
+                "filed_at": filed_at,
+                "esign_accepted_at": esign_at,
+                "ip_hash": meta.get("ip_hash"),
+                "user_agent_hash": meta.get("user_agent_hash"),
+                "metadata_path": str(meta_path),
+                "encrypted_path": encrypted_path,
+                "summary_path": summary_path,
+            }
+            try:
+                record["tax_year"] = int(record["tax_year"])
+            except (TypeError, ValueError):
+                pass
+            try:
+                record["download_url"] = request.url_for(
+                    "ui_t183_download", slug=slug, record_id=record_id
+                )
+            except Exception:  # pragma: no cover - url_for may fail if router not mounted
+                record["download_url"] = None
+            records.append(record)
+    records.sort(key=lambda entry: entry.get("signed_at") or "", reverse=True)
+    return records, info
+
+
+def _t183_consent_context(
+    request: Request,
+    slug: str,
+    *,
+    messages: list[str] | None = None,
+    errors: dict[str, str] | None = None,
+    form_data: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], bool, str]:
+    normalized = slugify(slug)
+    state, _, _, has_state = _load_return_draft(normalized)
+    if not has_state:
+        state = _default_return_form_state()
+    taxpayer_state = state.get("taxpayer", {}) if isinstance(state, dict) else {}
+    first = str(taxpayer_state.get("first_name", "") or "").strip()
+    last = str(taxpayer_state.get("last_name", "") or "").strip()
+    display_name = " ".join(part for part in [first, last] if part)
+    sin = str(taxpayer_state.get("sin", "") or "").strip()
+    tax_year = state.get("tax_year") if isinstance(state, dict) else ""
+
+    # Safely coerce tax_year to text for display
+    try:
+        tax_year_text = str(int(cast(int | str, tax_year)))
+    except (TypeError, ValueError):
+        tax_year_text = str(tax_year or "")
+
+    context: dict[str, Any] = {
+        "request": request,
+        "profile_slug": normalized,
+        "tax_year": tax_year_text,
+        "taxpayer_name": display_name,
+        "masked_sin": mask_sin(sin),
+        "has_valid_sin": bool(sin and len(sin) == 9 and sin.isdigit()),
+        "retention_years": RETENTION_YEARS,
+        "ip_address": request.client.host if request.client else "",
+        "user_agent": request.headers.get("user-agent", ""),
+        "messages": messages or [],
+        "errors": errors or {},
+        "form": form_data or {},
+        "t183_state": state.get("t183") if isinstance(state, dict) else {},
+    }
+    context["default_attestation"] = (
+        form_data.get("attestation_text")
+        if form_data and form_data.get("attestation_text")
+        else f"I authorize Tax App to electronically file my {tax_year_text or 'current'} income tax return using Form T183."
+    )
+    return context, state, has_state, sin
 
 
 def _relative_artifact_label(path: Path) -> str:
@@ -496,7 +807,6 @@ def profiles_home(request: Request) -> HTMLResponse:
 @router.post("/profiles", response_class=RedirectResponse)
 async def create_profile(request: Request) -> RedirectResponse:
     form = await request.form()
-    # Safely coerce text (mypy fix for UploadFile | str)
     name = _form_text(form.get("name")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
@@ -535,7 +845,6 @@ def restore(slug: str) -> RedirectResponse:
 @router.post("/profiles/{slug}/rename", response_class=RedirectResponse)
 async def rename(slug: str, request: Request) -> RedirectResponse:
     form = await request.form()
-    # Safely coerce text (mypy fix for UploadFile | str)
     new_name = _form_text(form.get("new_name")).strip()
     old_slug = slugify(slug)
     new_slug = slugify(new_name)
@@ -546,6 +855,206 @@ async def rename(slug: str, request: Request) -> RedirectResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(url=f"/ui/profiles/{new_slug}?renamed=1", status_code=303)
+
+
+def _validate_record_id(value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned or any(ch in cleaned for ch in {"/", "\\", ".."}):
+        raise HTTPException(status_code=400, detail="Invalid record identifier")
+    if not cleaned.startswith("t183_"):
+        raise HTTPException(status_code=400, detail="Invalid record identifier")
+    return cleaned
+
+
+@router.get("/profiles/{slug}/t183", response_class=HTMLResponse, name="ui_t183_consent")
+def view_t183_consent(request: Request, slug: str) -> HTMLResponse:
+    context, _, has_state, _ = _t183_consent_context(request, slug)
+    if not has_state:
+        context.setdefault("messages", []).append(
+            "No saved return draft found. The consent page will use blank defaults."
+        )
+    if not context["has_valid_sin"]:
+        context.setdefault("errors", {})["sin"] = "Taxpayer SIN must be recorded before consent."
+    return TEMPLATES.TemplateResponse("t183_consent.html", context)
+
+
+async def _persist_t183_consent(
+    request: Request,
+    slug: str,
+    state: dict[str, Any],
+    sin: str,
+    form_data: dict[str, Any],
+) -> tuple[Any, Path, Path, Path]:
+    retention_root = _t183_retention_root(request)
+    retention_root.mkdir(parents=True, exist_ok=True)
+
+    tax_year_raw = state.get("tax_year") if isinstance(state, dict) else None
+    try:
+        tax_year = int(cast(int | str, tax_year_raw))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Unable to determine tax year for consent")
+
+    last_four = sin[-4:]
+    target_dir = retention_root / f"{tax_year}" / last_four
+    target_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = int(datetime.now(timezone.utc).timestamp())
+    # Ensure unique filenames
+    while True:
+        base_name = f"t183_{timestamp}"
+        summary_path = target_dir / f"{base_name}.txt"
+        meta_path = target_dir / f"{base_name}.json"
+        encrypted_path = target_dir / f"{base_name}.enc"
+        if not summary_path.exists() and not meta_path.exists() and not encrypted_path.exists():
+            break
+        timestamp += 1
+    signed_at = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    summary_lines = [
+        "T183 Electronic Consent Summary",
+        f"Profile: {slug}",
+        f"Tax year: {tax_year}",
+        f"Masked SIN: {mask_sin(sin)}",
+        f"Taxpayer name: {form_data.get('signature_name', '')}",
+        f"Signature attested at: {signed_at.isoformat()}",
+        "",
+        "Attestation:",
+        form_data.get("attestation_text", ""),
+    ]
+    summary_path = target_dir / f"t183_{timestamp}.txt"
+    summary_path.write_text("\n".join(line for line in summary_lines if line is not None), encoding="utf-8")
+
+    ip_hash = _hash_metadata_value(form_data.get("ip"))
+    ua_hash = _hash_metadata_value(form_data.get("user_agent"))
+    record = build_record(
+        original_sin=sin,
+        signed_at=signed_at,
+        filed_at=signed_at,
+        pdf_path=str(summary_path),
+        ip_hash=ip_hash,
+        user_agent_hash=ua_hash,
+        esign_accepted_at=signed_at,
+    )
+    encrypted_path_str = store_signed(
+        record,
+        base_dir=str(retention_root),
+        tax_year=tax_year,
+        original_sin=sin,
+    )
+    encrypted_path = Path(encrypted_path_str)
+    meta_path = target_dir / f"{encrypted_path.stem}.json"
+    metadata = {
+        "profile": slug,
+        "tax_year": tax_year,
+        "record_id": encrypted_path.stem,
+        "masked_sin": record.taxpayer_sin_masked,
+        "signed_at": record.signed_at.isoformat(),
+        "filed_at": record.filed_at.isoformat(),
+        "esign_accepted_at": record.esign_accepted_at.isoformat()
+        if record.esign_accepted_at
+        else None,
+        "ip_hash": record.ip_hash,
+        "user_agent_hash": record.user_agent_hash,
+        "summary_path": str(summary_path),
+        "encrypted_path": str(encrypted_path),
+        "signature_name": form_data.get("signature_name"),
+        "attestation": form_data.get("attestation_text"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    meta_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    return record, encrypted_path, summary_path, meta_path
+
+
+@router.post("/profiles/{slug}/t183", response_class=RedirectResponse)
+async def submit_t183_consent(request: Request, slug: str) -> Response:
+    form = await request.form()
+    form_data = {key: _form_text(form.get(key)) for key in form.keys()}
+    signature = form_data.get("signature", "").strip()
+    confirm = form_data.get("confirm", "")
+    if not signature:
+        context, _, _, _ = _t183_consent_context(
+            request,
+            slug,
+            errors={"signature": "Please enter your full name as a signature."},
+            form_data=form_data,
+        )
+        return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
+    if confirm not in {"on", "true", "1"}:
+        context, _, _, _ = _t183_consent_context(
+            request,
+            slug,
+            errors={"confirm": "Please confirm that you authorize transmission."},
+            form_data=form_data,
+        )
+        return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
+    context, state, has_state, sin = _t183_consent_context(request, slug, form_data=form_data)
+    if not has_state:
+        state = _default_return_form_state()
+    if not sin or len(sin) != 9 or not sin.isdigit():
+        context.setdefault("errors", {})["sin"] = "Taxpayer SIN must be recorded before consent."
+        return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
+    form_data.update(
+        {
+            "signature_name": signature,
+            "attestation_text": form_data.get("attestation_text")
+            or "Client consented to Form T183 electronic filing.",
+            "ip": request.client.host if request.client else "",
+            "user_agent": request.headers.get("user-agent", ""),
+        }
+    )
+    record, encrypted_path, summary_path, meta_path = await _persist_t183_consent(
+        request, slugify(slug), state, sin, form_data
+    )
+    t183_state = state.setdefault("t183", {})
+    t183_state["signed_ts"] = record.signed_at.isoformat()
+    t183_state["ip_hash"] = record.ip_hash or ""
+    t183_state["user_agent_hash"] = record.user_agent_hash or ""
+    t183_state["pdf_path"] = str(summary_path)
+    t183_state["record_path"] = str(encrypted_path)
+    t183_state["metadata_path"] = str(meta_path)
+    _save_return_draft(slugify(slug), state, "transmit")
+    return RedirectResponse(
+        url=f"/ui/profiles/{slugify(slug)}?t183_signed=1&record={encrypted_path.stem}",
+        status_code=303,
+    )
+
+
+@router.get(
+    "/profiles/{slug}/t183/{record_id}/download",
+    response_class=FileResponse,
+    name="ui_t183_download",
+)
+def download_t183_record(request: Request, slug: str, record_id: str) -> FileResponse:
+    normalized = slugify(slug)
+    record_key = _validate_record_id(record_id)
+    state, _, _, has_state = _load_return_draft(normalized)
+    if not has_state:
+        raise HTTPException(status_code=404, detail="No T183 records found for this profile")
+    taxpayer_state = state.get("taxpayer", {}) if isinstance(state, dict) else {}
+    sin = str(taxpayer_state.get("sin", "") or "").strip()
+    if not sin or len(sin) != 9 or not sin.isdigit():
+        raise HTTPException(status_code=404, detail="No T183 records found for this profile")
+    retention_root = _t183_retention_root(request)
+    last_four = sin[-4:]
+    candidate_dirs = []
+    if retention_root.exists():
+        for year_dir in retention_root.iterdir():
+            if not year_dir.is_dir():
+                continue
+            candidate = year_dir / last_four
+            if candidate.exists() and candidate.is_dir():
+                candidate_dirs.append(candidate)
+    for directory in candidate_dirs:
+        meta_path = directory / f"{record_key}.json"
+        encrypted_path = directory / f"{record_key}.enc"
+        if not meta_path.exists() or not encrypted_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("profile") and meta["profile"] != normalized:
+            continue
+        return FileResponse(encrypted_path, filename=encrypted_path.name, media_type="application/octet-stream")
+    raise HTTPException(status_code=404, detail="Record not found")
 
 
 @router.get("/profiles/{slug}", response_class=HTMLResponse)
@@ -563,6 +1072,10 @@ def edit_profile(request: Request, slug: str) -> HTMLResponse:
             "messages": messages,
         }
     )
+    context["retention_years"] = RETENTION_YEARS
+    records, t183_info = _collect_t183_records(request, normalized)
+    context["t183_records"] = records
+    context["t183_info"] = t183_info
     return TEMPLATES.TemplateResponse("edit.html", context)
 
 
@@ -593,18 +1106,30 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
         "format_currency": _format_currency,
     }
     if errors:
-        # Display field-level errors at the top of the preview
         pe = cast(list[str], context.setdefault("preview_errors", []))
         pe.extend(list(errors.values()))
     return TEMPLATES.TemplateResponse("preview.html", context)
 
 
-@router.get("/returns/new", response_class=HTMLResponse)
-def new_return(request: Request) -> HTMLResponse:
+def _render_return_form(request: Request, step: str | None) -> HTMLResponse:
     settings = _resolve_settings(request)
+    form_state = _default_return_form_state()
+    current_step = _normalize_step(step)
+    messages: list[str] = []
+    autosave_profile = get_active_profile()
+    autosave_url = ""
+    if autosave_profile:
+        saved_state, saved_step, saved_timestamp, has_state = _load_return_draft(autosave_profile)
+        if has_state:
+            form_state = saved_state
+        if saved_step:
+            current_step = saved_step
+        if saved_timestamp:
+            messages.append(f"Loaded draft saved at {saved_timestamp}.")
+        autosave_url = str(request.url_for("ui_autosave_return"))
     context: dict[str, Any] = {
         "request": request,
-        "form_state": _default_return_form_state(),
+        "form_state": form_state,
         "field_errors": {},
         "issues": [],
         "calc": None,
@@ -613,57 +1138,34 @@ def new_return(request: Request) -> HTMLResponse:
         "prepare_ok": False,
         "artifact_paths": [],
         "format_currency": _format_currency,
-        "messages": [],
-        "slip_detections": [],
-        "slip_ingest_errors": [],
+        "messages": messages,
+        "form_steps": FORM_STEPS,
+        "current_step": current_step,
+        "autosave_profile": autosave_profile,
+        "autosave_url": autosave_url,
+        "autosave_interval": AUTOSAVE_INTERVAL_MS,
     }
-    context.update(_transmit_gate_context(context["form_state"], settings))
+    context.update(_transmit_gate_context(form_state, settings))
     return TEMPLATES.TemplateResponse("return_form.html", context)
+
+
+@router.get("/returns/new", response_class=HTMLResponse)
+def new_return(request: Request, step: str | None = Query(None)) -> HTMLResponse:
+    return _render_return_form(request, step)
+
+
+@router.get("/returns/new/{step_slug}", response_class=HTMLResponse)
+def new_return_step(request: Request, step_slug: str) -> HTMLResponse:
+    return _render_return_form(request, step_slug)
 
 
 @router.post("/returns/prepare", response_class=HTMLResponse)
 async def prepare_return(request: Request) -> HTMLResponse:
     form = await request.form()
-    uploads = [
-        item
-        for item in form.getlist("slip_documents")
-        if isinstance(item, UploadFile) and item.filename
-    ]
-    slip_detections: list[SlipDetection]
-    slip_ingest_errors: list[str]
-    if uploads:
-        slip_detections, slip_ingest_errors = await ingest_slip_uploads(uploads)
-    else:
-        slip_detections, slip_ingest_errors = [], []
-
-    form_dict = {key: form.get(key) for key in form.keys() if key != "slip_documents"}
-
-    existing_indices: list[int] = []
-    for key in form_dict.keys():
-        if not isinstance(key, str):
-            continue
-        if not key.startswith("slips_t4-"):
-            continue
-        parts = key.split("-", 2)
-        if len(parts) < 3:
-            continue
-        if parts[1].isdigit():
-            existing_indices.append(int(parts[1]))
-    next_index = (max(existing_indices) + 1) if existing_indices else 0
-
-    for detection in slip_detections:
-        if detection.fields:
-            assigned_index = next_index
-            detection.applied = True
-            detection.applied_index = assigned_index
-            next_index += 1
-            for field, value in detection.fields.items():
-                form_dict[f"slips_t4-{assigned_index}-{field}"] = value
-        else:
-            detection.applied = False
-            detection.applied_index = None
-
+    form_dict = {key: form.get(key) for key in form.keys()}
     payload, field_errors, state = _parse_return_form(form_dict)
+
+    current_step = _normalize_step(_form_text(form.get("current_step")))
 
     issues: list[str] = []
     calc_dump: dict[str, Any] | None = None
@@ -682,6 +1184,12 @@ async def prepare_return(request: Request) -> HTMLResponse:
             calc_json = json.dumps(calc_dump, indent=2)
 
     settings = _resolve_settings(request)
+    autosave_profile = get_active_profile()
+    autosave_url = str(request.url_for("ui_autosave_return")) if autosave_profile else ""
+
+    messages: list[str] = []
+    if payload is None:
+        messages.append("Please review the highlighted fields before continuing.")
     context: dict[str, Any] = {
         "request": request,
         "form_state": state,
@@ -693,15 +1201,77 @@ async def prepare_return(request: Request) -> HTMLResponse:
         "prepare_ok": payload is not None and not issues,
         "artifact_paths": [],
         "format_currency": _format_currency,
-        "slip_detections": [d.as_dict() for d in slip_detections],
-        "slip_ingest_errors": slip_ingest_errors,
+        "messages": messages,
+        "form_steps": FORM_STEPS,
+        "current_step": current_step,
+        "autosave_profile": autosave_profile,
+        "autosave_url": autosave_url,
+        "autosave_interval": AUTOSAVE_INTERVAL_MS,
     }
-    messages: list[str] = []
-    if payload is None:
-        messages.append("Please review the highlighted fields before continuing.")
-    context["messages"] = messages
     context.update(_transmit_gate_context(state, settings))
     return TEMPLATES.TemplateResponse("return_form.html", context, status_code=status_code)
+
+
+@router.post("/returns/autosave", response_class=JSONResponse, name="ui_autosave_return")
+async def autosave_return(request: Request, payload: ReturnAutosavePayload) -> JSONResponse:
+    active_profile = get_active_profile()
+    if not active_profile:
+        raise HTTPException(status_code=400, detail="No active profile selected for autosave")
+    if payload.profile != active_profile:
+        raise HTTPException(status_code=400, detail="Autosave profile mismatch")
+    sanitized_state = _merge_return_form_state(_default_return_form_state(), payload.state)
+    _save_return_draft(payload.profile, sanitized_state, payload.step)
+    return JSONResponse({"saved": True, "step": payload.step})
+
+
+@router.post("/returns/{profile}/{year}/slips/upload", response_class=JSONResponse)
+async def upload_slip(
+    request: Request,
+    profile: str,
+    year: int,
+    upload: UploadFile = File(...),
+) -> JSONResponse:
+    settings = _resolve_settings(request)
+    store = slip_ingest.resolve_store(request.app)
+    try:
+        status = await store.process_upload(profile, year, upload, settings=settings)
+    except slip_ingest.SlipUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(status.model_dump(mode="json"))
+
+
+@router.get("/returns/{profile}/{year}/slips/status", response_class=JSONResponse)
+async def slip_status(request: Request, profile: str, year: int, job_id: str) -> JSONResponse:
+    store = slip_ingest.resolve_store(request.app)
+    try:
+        status = await store.job_status(profile, year, job_id)
+    except slip_ingest.SlipJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(status.model_dump(mode="json"))
+
+
+@router.post("/returns/{profile}/{year}/slips/apply", response_class=JSONResponse)
+async def apply_slip_detections(
+    request: Request,
+    profile: str,
+    year: int,
+    payload: slip_ingest.ApplyDetectionsRequest,
+) -> JSONResponse:
+    store = slip_ingest.resolve_store(request.app)
+    try:
+        detections = await store.apply(profile, year, payload.detection_ids)
+    except slip_ingest.SlipApplyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(
+        {"detections": [detection.model_dump(mode="json") for detection in detections]}
+    )
+
+
+@router.post("/returns/{profile}/{year}/slips/clear", response_class=JSONResponse)
+async def clear_slip_detections(request: Request, profile: str, year: int) -> JSONResponse:
+    store = slip_ingest.resolve_store(request.app)
+    await store.clear(profile, year)
+    return JSONResponse({"cleared": True})
 
 
 @router.get("/artifacts/list", response_class=JSONResponse)
@@ -740,4 +1310,3 @@ def download_artifact(request: Request, path: str) -> FileResponse:
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")
     return FileResponse(candidate)
-

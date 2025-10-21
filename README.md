@@ -41,6 +41,24 @@ pip install -r requirements.txt
 > included in `requirements.txt`. Ensure your environment picks up the updated
 > dependency when reinstalling requirements.
 
+## Native OCR and browser prerequisites
+
+OCR features depend on native binaries in addition to the Python packages listed
+in `requirements.txt`.
+
+- **Tesseract OCR** – install the CLI binary that matches your platform
+  (Mac: `brew install tesseract`, Ubuntu/Debian: `sudo apt-get install -y tesseract-ocr`,
+  Windows: download the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki)).
+- **Poppler utilities** – required by `pdf2image` for PDF rasterization
+  (Mac: `brew install poppler`, Ubuntu/Debian: `sudo apt-get install -y poppler-utils`,
+  Windows: install the [prebuilt binaries](https://blog.alivate.com.au/poppler-windows/)
+  and add `bin/` to `PATH`).
+
+CI runners and developer workstations should install these prerequisites before
+running the OCR flows so that `pytesseract` and `pdf2image` can invoke the
+underlying binaries. For Playwright smoke tests, run `playwright install` after
+`pip install -r requirements.txt` to download the supported browsers.
+
 ## Guided wizard (no JSON typing)
 
 The estimator now includes a prompt-driven CLI so you can answer questions

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from importlib import import_module
+import json
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import app.wizard as wizard
 import app.wizard.profiles as profiles
+from app.config import get_settings
+from app.efile import crypto
 
 ui_router_module = import_module("app.ui.router")
+
+TEST_KEY = "jLNo6J1iO5Y5P2bIC2T5T8DKS-p91Z9a7qV3-0iKqa4="
 
 
 def _configure_profiles_dirs(monkeypatch, tmp_path):
@@ -30,10 +35,25 @@ def _configure_profiles_dirs(monkeypatch, tmp_path):
     return base
 
 
+def _configure_crypto(monkeypatch):
+    monkeypatch.setenv("T183_CRYPTO_KEY", TEST_KEY)
+    get_settings.cache_clear()
+    crypto._cipher.cache_clear()
+
+
 def _build_client():
     app = FastAPI()
     app.include_router(ui_router_module.router)
     return TestClient(app)
+
+
+def _seed_return_draft(slug: str, tax_year: int = 2025) -> None:
+    state = ui_router_module._default_return_form_state()
+    state["taxpayer"]["sin"] = "046454286"
+    state["taxpayer"]["first_name"] = "Test"
+    state["taxpayer"]["last_name"] = "User"
+    state["tax_year"] = str(tax_year)
+    ui_router_module._save_return_draft(slug, state, "transmit")
 
 
 def test_profiles_home_lists_profiles(tmp_path, monkeypatch):
@@ -178,3 +198,89 @@ def test_prepare_return_handles_valid_form(monkeypatch, tmp_path):
     body = response.text
     assert "Return validated" in body or "Return validated." in body
     assert "Submitted payload" in body
+
+
+def test_t183_consent_page_includes_masked_sin(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    _configure_crypto(monkeypatch)
+    profiles.save_profile_data("tester", {})
+    _seed_return_draft("tester")
+
+    client = _build_client()
+    client.app.state.artifact_root = tmp_path / "artifacts"
+
+    response = client.get("/ui/profiles/tester/t183")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "***-***-4286" in body
+    assert "retain them for 6 years" in body
+
+
+def test_t183_consent_submission_stores_record(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    _configure_crypto(monkeypatch)
+    profiles.save_profile_data("tester", {})
+    _seed_return_draft("tester")
+
+    client = _build_client()
+    artifact_root = tmp_path / "artifacts"
+    client.app.state.artifact_root = artifact_root
+
+    response = client.post(
+        "/ui/profiles/tester/t183",
+        data={"signature": "Test User", "confirm": "on"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "t183_signed=1" in response.headers["location"]
+
+    target_dir = artifact_root / ui_router_module.T183_RETENTION_DIRNAME / "2025" / "4286"
+    assert target_dir.exists()
+    encrypted_files = sorted(target_dir.glob("t183_*.enc"))
+    metadata_files = sorted(target_dir.glob("t183_*.json"))
+    summary_files = sorted(target_dir.glob("t183_*.txt"))
+    assert encrypted_files and metadata_files and summary_files
+
+    metadata = json.loads(metadata_files[0].read_text(encoding="utf-8"))
+    assert metadata["profile"] == "tester"
+    assert metadata["masked_sin"] == "***-***-4286"
+    assert metadata["encrypted_path"].endswith(encrypted_files[0].name)
+
+    state, _, _, has_state = ui_router_module._load_return_draft("tester")
+    assert has_state
+    assert state["t183"]["record_path"].endswith(encrypted_files[0].name)
+    assert state["t183"]["metadata_path"].endswith(metadata_files[0].name)
+
+    download = client.get(
+        f"/ui/profiles/tester/t183/{encrypted_files[0].stem}/download",
+        follow_redirects=False,
+    )
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "application/octet-stream"
+
+
+def test_profile_page_lists_t183_records(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    _configure_crypto(monkeypatch)
+    profiles.save_profile_data("tester", {})
+    _seed_return_draft("tester")
+
+    client = _build_client()
+    artifact_root = tmp_path / "artifacts"
+    client.app.state.artifact_root = artifact_root
+
+    # Seed a stored record
+    client.post(
+        "/ui/profiles/tester/t183",
+        data={"signature": "Test User", "confirm": "on"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/ui/profiles/tester")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "T183 authorizations" in body
+    assert "Encrypted blob" in body
