@@ -733,10 +733,11 @@ def _t183_consent_context(
     display_name = " ".join(part for part in [first, last] if part)
     sin = str(taxpayer_state.get("sin", "") or "").strip()
     tax_year = state.get("tax_year") if isinstance(state, dict) else ""
+    # 736–739
     try:
-        tax_year_text = str(int(tax_year))
+    tax_year_text = str(int(cast(int | str, tax_year)))
     except (TypeError, ValueError):
-        tax_year_text = str(tax_year or "")
+    tax_year_text = str(tax_year or "")
     context: dict[str, Any] = {
         "request": request,
         "profile_slug": normalized,
@@ -884,12 +885,13 @@ async def _persist_t183_consent(
 ) -> tuple[Any, Path, Path, Path]:
     retention_root = _t183_retention_root(request)
     retention_root.mkdir(parents=True, exist_ok=True)
-    tax_year_raw = state.get("tax_year") if isinstance(state, dict) else None
-    try:
-        tax_year = int(tax_year_raw)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Unable to determine tax year for consent")
-    last_four = sin[-4:]
+    # 887–892
+tax_year_raw = state.get("tax_year") if isinstance(state, dict) else None
+try:
+    tax_year = int(cast(int | str, tax_year_raw))
+except (TypeError, ValueError):
+    raise HTTPException(status_code=400, detail="Unable to determine tax year for consent")
+last_four = sin[-4:]
     target_dir = retention_root / f"{tax_year}" / last_four
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = int(datetime.now(timezone.utc).timestamp())
