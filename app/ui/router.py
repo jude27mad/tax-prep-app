@@ -5,16 +5,17 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
-from starlette.datastructures import UploadFile  # for type-narrowing form inputs
+from starlette.datastructures import UploadFile as StarletteUploadFile  # for type-narrowing form inputs
 
 from app.config import Settings, get_settings
 from app.core.models import ReturnInput
 from app.core.validate.pre_submit import validate_return_input
 from app.efile.gating import build_transmit_gate
+from app.ui import slip_ingest
 from app.wizard import (
     BASE_DIR,
     CLI_BOOL_FIELDS,
@@ -146,7 +147,7 @@ def _friendly_profile_path(slug: str) -> str:
 
 def _form_text(val: Any) -> str:
     """Return a safe text value from a form field which might be UploadFile | str | None."""
-    if isinstance(val, UploadFile):
+    if isinstance(val, StarletteUploadFile):
         # For text fields, treat file inputs as empty string; or use filename if you prefer.
         return val.filename or ""
     if val is None:
@@ -164,7 +165,7 @@ def _extract_form_data(form: dict[str, Any]) -> tuple[dict[str, Any], dict[str, 
         raw_value = form.get(field)
         if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
             # If UploadFile, treat as empty too
-            if isinstance(raw_value, UploadFile):
+            if isinstance(raw_value, StarletteUploadFile):
                 data[field] = None
                 continue
             data[field] = None
@@ -673,6 +674,56 @@ async def prepare_return(request: Request) -> HTMLResponse:
     context["messages"] = messages
     context.update(_transmit_gate_context(state, settings))
     return TEMPLATES.TemplateResponse("return_form.html", context, status_code=status_code)
+
+
+@router.post("/returns/{profile}/{year}/slips/upload", response_class=JSONResponse)
+async def upload_slip(
+    request: Request,
+    profile: str,
+    year: int,
+    upload: UploadFile = File(...),
+) -> JSONResponse:
+    settings = _resolve_settings(request)
+    store = slip_ingest.resolve_store(request.app)
+    try:
+        status = await store.process_upload(profile, year, upload, settings=settings)
+    except slip_ingest.SlipUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(status.model_dump(mode="json"))
+
+
+@router.get("/returns/{profile}/{year}/slips/status", response_class=JSONResponse)
+async def slip_status(request: Request, profile: str, year: int, job_id: str) -> JSONResponse:
+    store = slip_ingest.resolve_store(request.app)
+    try:
+        status = await store.job_status(profile, year, job_id)
+    except slip_ingest.SlipJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(status.model_dump(mode="json"))
+
+
+@router.post("/returns/{profile}/{year}/slips/apply", response_class=JSONResponse)
+async def apply_slip_detections(
+    request: Request,
+    profile: str,
+    year: int,
+    payload: slip_ingest.ApplyDetectionsRequest,
+) -> JSONResponse:
+    store = slip_ingest.resolve_store(request.app)
+    try:
+        detections = await store.apply(profile, year, payload.detection_ids)
+    except slip_ingest.SlipApplyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(
+        {"detections": [detection.model_dump(mode="json") for detection in detections]}
+    )
+
+
+@router.post("/returns/{profile}/{year}/slips/clear", response_class=JSONResponse)
+async def clear_slip_detections(request: Request, profile: str, year: int) -> JSONResponse:
+    store = slip_ingest.resolve_store(request.app)
+    await store.clear(profile, year)
+    return JSONResponse({"cleared": True})
 
 
 @router.get("/artifacts/list", response_class=JSONResponse)
