@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, Tuple, List
 
 from fastapi import UploadFile
 from pydantic import BaseModel, Field
@@ -43,9 +43,9 @@ IMAGE_EXTENSIONS = {
     ".gif",
     ".webp",
 }
-ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
+ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf", ".txt"}
 
-MAX_UPLOAD_SIZE = 8 * 1024 * 1024
+MAX_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MiB cap per upload
 PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
@@ -280,6 +280,11 @@ def _extract_text(extension: str, data: bytes) -> str:
         return _extract_text_from_pdf(data)
     if extension in IMAGE_EXTENSIONS:
         return _extract_text_from_image(data)
+    if extension == ".txt":
+        try:
+            return data.decode("utf-8", errors="ignore")
+        except Exception as exc:  # pragma: no cover
+            raise SlipUploadError("Unable to read text upload") from exc
     raise SlipUploadError("Unsupported file type for text extraction")
 
 
@@ -429,18 +434,31 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
 
 
 async def ingest_slip_uploads(
-    profile: str,
-    year: int,
     uploads: Iterable[UploadFile],
+    profile: str = "default",
+    year: int | None = None,
     *,
-    settings: Settings,
+    settings: Settings | None = None,
     app: Any | None = None,
-) -> list[SlipJobStatus]:
+) -> Tuple[List[SlipDetection], List[str]]:
+    year_val = year if year is not None else datetime.now(timezone.utc).year
+    cfg = settings or Settings()  # default settings for tests
     store = resolve_store(app)
-    statuses: list[SlipJobStatus] = []
+
+    detections: List[SlipDetection] = []
+    errors: List[str] = []
+
     for upload in uploads:
-        statuses.append(await store.process_upload(profile, year, upload, settings=settings))
-    return statuses
+        try:
+            status = await store.process_upload(profile, int(year_val), upload, settings=cfg)
+            if status.status == "complete" and status.detection is not None:
+                detections.append(status.detection)
+            elif status.status == "error":
+                errors.append(status.error or "ingestion failed")
+        except Exception as exc:
+            errors.append(str(exc))
+
+    return detections, errors
 
 
 async def slip_job_status(
