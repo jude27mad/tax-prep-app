@@ -411,6 +411,11 @@ def _build_detection_fields(slip_type: str, text: str) -> dict[str, str]:
     return fields
 
 
+def _keyword_pattern(keyword: str) -> str:
+    escaped = re.escape(keyword)
+    return escaped.replace("\\ ", r"\s+")
+
+
 def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
     normalized = text.replace("\r", " ")
     for keyword in keywords:
@@ -430,6 +435,16 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
     return None
 
 
-def _keyword_pattern(keyword: str) -> str:
-    escaped = re.escape(keyword)
-    return escaped.replace("\\ ", r"\s+")
+async def ingest_slip_uploads(
+    profile: str,
+    year: int,
+    uploads: Iterable[UploadFile],
+    *,
+    settings: Settings,
+    app: Any | None = None,
+) -> list[SlipJobStatus]:
+    store = resolve_store(app)
+    statuses: list[SlipJobStatus] = []
+    for upload in uploads:
+        statuses.append(await store.process_upload(profile, year, upload, settings=settings))
+    return statuses
