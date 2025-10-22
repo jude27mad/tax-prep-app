@@ -50,22 +50,19 @@ PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
 
-# ----------------------------- Errors & Models -------------------------------
-
 class SlipUploadError(Exception):
-    """Raised when an upload fails validation or ingestion."""
+    pass
 
 
 class SlipJobNotFoundError(Exception):
-    """Raised when a requested ingestion job cannot be located."""
+    pass
 
 
 class SlipApplyError(Exception):
-    """Raised when staged detections cannot be applied."""
+    pass
 
 
 class SlipDetection(BaseModel):
-    """Structured payload returned to the UI for an ingested slip."""
     id: str
     slip_type: str
     original_filename: str
@@ -107,11 +104,7 @@ class ApplyDetectionsRequest(BaseModel):
     detection_ids: list[str] | None = None
 
 
-# ----------------------------- In-memory Store -------------------------------
-
 class SlipStagingStore:
-    """In-memory staging area for slip ingestion workflows."""
-
     def __init__(self) -> None:
         self._jobs: dict[str, _SlipJobRecord] = {}
         self._staged: dict[str, dict[str, SlipDetection]] = {}
@@ -149,7 +142,7 @@ class SlipStagingStore:
             async with self._lock:
                 self._jobs[job_id] = record
             raise
-        except Exception as exc:  # pragma: no cover - defensive fallback
+        except Exception as exc:  # pragma: no cover
             record.status = "error"
             record.error = "Unable to process slip"
             async with self._lock:
@@ -215,7 +208,6 @@ _DEFAULT_STORE = SlipStagingStore()
 
 
 def resolve_store(app: Any | None = None) -> SlipStagingStore:
-    """Return the staging store associated with the running app instance."""
     if app is None:
         return _DEFAULT_STORE
     store = getattr(app.state, "slip_staging_store", None)
@@ -225,8 +217,6 @@ def resolve_store(app: Any | None = None) -> SlipStagingStore:
     setattr(app.state, "slip_staging_store", store)
     return store
 
-
-# ------------------------------- Core ingest ---------------------------------
 
 async def _ingest_upload(
     detection_id: str,
@@ -264,8 +254,6 @@ async def _ingest_upload(
         created_at=datetime.now(timezone.utc),
     )
 
-
-# ----------------------------- Helper functions ------------------------------
 
 def _resolve_extension(filename: str, content_type: str | None) -> str:
     extension = Path(filename).suffix.lower()
@@ -422,7 +410,6 @@ def _keyword_pattern(keyword: str) -> str:
 
 
 def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
-    """Find the first numeric value near any of the provided keywords."""
     normalized = text.replace("\r", " ")
     for keyword in keywords:
         pattern = _keyword_pattern(keyword)
@@ -436,7 +423,6 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
             amount = Decimal(cleaned)
         except (InvalidOperation, ValueError):
             continue
-        # Use the variable directly to avoid "assigned but never used"
         return format(amount.quantize(_CENT), "f")
     return None
 
@@ -454,3 +440,25 @@ async def ingest_slip_uploads(
     for upload in uploads:
         statuses.append(await store.process_upload(profile, year, upload, settings=settings))
     return statuses
+
+
+async def slip_job_status(
+    profile: str,
+    year: int,
+    job_id: str,
+    *,
+    app: Any | None = None,
+) -> SlipJobStatus:
+    store = resolve_store(app)
+    return await store.job_status(profile, year, job_id)
+
+
+async def apply_staged_detections(
+    profile: str,
+    year: int,
+    detection_ids: Iterable[str] | None = None,
+    *,
+    app: Any | None = None,
+) -> list[SlipDetection]:
+    store = resolve_store(app)
+    return await store.apply(profile, year, detection_ids)
