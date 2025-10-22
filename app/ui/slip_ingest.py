@@ -45,7 +45,7 @@ IMAGE_EXTENSIONS = {
 }
 ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
 
-MAX_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MiB cap per upload
+MAX_UPLOAD_SIZE = 8 * 1024 * 1024
 PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
@@ -182,20 +182,21 @@ class SlipStagingStore:
                 return []
 
             if detection_ids is None:
-                results = list(staged.values())
+                all_detections = list(staged.values())
                 self._staged.pop(bucket, None)
-                return results
+                return all_detections
 
-            results: list[SlipDetection] = []
+            selected: list[SlipDetection] = []
             for detection_id in detection_ids:
                 detection = staged.pop(detection_id, None)
                 if detection is None:
                     raise SlipApplyError(f"Detection {detection_id} not found for profile")
-                results.append(detection)
+                selected.append(detection)
 
             if not staged:
                 self._staged.pop(bucket, None)
-            return results
+
+            return selected
 
     async def clear(self, profile: str, year: int) -> None:
         safe_profile = slugify(profile) or "default"
