@@ -223,6 +223,231 @@ async def _ingest_upload(
     detection_id: str,
     profile: str,
     year: int,
+    upload: UploadFile,from __future__ import annotations
+
+import asyncio
+import hashlib
+import io
+import mimetypes
+import re
+import secrets
+import tempfile
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any, Iterable, Literal, Tuple, List
+
+from fastapi import UploadFile
+from pydantic import BaseModel, Field
+from PyPDF2 import PdfReader
+
+from app.config import Settings
+from app.wizard import BASE_DIR, slugify
+
+__all__ = [
+    "ingest_slip_uploads",
+    "slip_job_status",
+    "apply_staged_detections",
+    "SlipUploadError",
+    "SlipJobNotFoundError",
+    "SlipApplyError",
+    "SlipDetection",
+    "SlipJobStatus",
+    "SlipStagingStore",
+    "resolve_store",
+]
+
+IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tif",
+    ".tiff",
+    ".bmp",
+    ".gif",
+    ".webp",
+}
+ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf", ".txt"}
+
+MAX_UPLOAD_SIZE = 8 * 1024 * 1024
+PREVIEW_LIMIT = 2_000
+_CENT = Decimal("0.01")
+
+
+class SlipUploadError(Exception):
+    pass
+
+
+class SlipJobNotFoundError(Exception):
+    pass
+
+
+class SlipApplyError(Exception):
+    pass
+
+
+class SlipDetection(BaseModel):
+    id: str
+    slip_type: str
+    original_filename: str
+    stored_filename: str
+    stored_path: str
+    size: int
+    preview: str = Field(default="")
+    fields: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class SlipJobStatus(BaseModel):
+    job_id: str
+    status: Literal["processing", "complete", "error"]
+    detection: SlipDetection | None = None
+    error: str | None = None
+
+
+@dataclass
+class _SlipJobRecord:
+    job_id: str
+    bucket: str
+    original_filename: str
+    status: Literal["processing", "complete", "error"] = "processing"
+    detection: SlipDetection | None = None
+    error: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_status(self) -> SlipJobStatus:
+        return SlipJobStatus(
+            job_id=self.job_id,
+            status=self.status,
+            detection=self.detection,
+            error=self.error,
+        )
+
+
+class ApplyDetectionsRequest(BaseModel):
+    detection_ids: list[str] | None = None
+
+
+class SlipStagingStore:
+    def __init__(self) -> None:
+        self._jobs: dict[str, _SlipJobRecord] = {}
+        self._staged: dict[str, dict[str, SlipDetection]] = {}
+        self._lock = asyncio.Lock()
+
+    @staticmethod
+    def _bucket(profile: str, year: int) -> str:
+        return f"{profile}:{year}"
+
+    async def process_upload(
+        self,
+        profile: str,
+        year: int,
+        upload: UploadFile,
+        *,
+        settings: Settings,
+    ) -> SlipJobStatus:
+        safe_profile = slugify(profile) or "default"
+        bucket = self._bucket(safe_profile, year)
+        job_id = secrets.token_hex(8)
+        record = _SlipJobRecord(
+            job_id=job_id,
+            bucket=bucket,
+            original_filename=upload.filename or "",
+        )
+        async with self._lock:
+            self._jobs[job_id] = record
+        try:
+            detection = await _ingest_upload(
+                job_id, safe_profile, year, upload, settings=settings
+            )
+        except SlipUploadError as exc:
+            record.status = "error"
+            record.error = str(exc)
+            async with self._lock:
+                self._jobs[job_id] = record
+            raise
+        except Exception as exc:
+            record.status = "error"
+            record.error = "Unable to process slip"
+            async with self._lock:
+                self._jobs[job_id] = record
+            raise SlipUploadError("Unable to process slip") from exc
+        else:
+            record.status = "complete"
+            record.detection = detection
+            async with self._lock:
+                self._jobs[job_id] = record
+                staged = self._staged.setdefault(bucket, {})
+                staged[detection.id] = detection
+            return record.to_status()
+        finally:
+            await upload.close()
+
+    async def job_status(self, profile: str, year: int, job_id: str) -> SlipJobStatus:
+        safe_profile = slugify(profile) or "default"
+        bucket = self._bucket(safe_profile, year)
+        async with self._lock:
+            record = self._jobs.get(job_id)
+        if record is None or record.bucket != bucket:
+            raise SlipJobNotFoundError("Upload job not found")
+        return record.to_status()
+
+    async def apply(
+        self,
+        profile: str,
+        year: int,
+        detection_ids: Iterable[str] | None = None,
+    ) -> list[SlipDetection]:
+        safe_profile = slugify(profile) or "default"
+        bucket = self._bucket(safe_profile, year)
+        async with self._lock:
+            staged = self._staged.get(bucket)
+            if not staged:
+                return []
+
+            if detection_ids is None:
+                all_detections = list(staged.values())
+                self._staged.pop(bucket, None)
+                return all_detections
+
+            selected: list[SlipDetection] = []
+            for detection_id in detection_ids:
+                detection = staged.pop(detection_id, None)
+                if detection is None:
+                    raise SlipApplyError(f"Detection {detection_id} not found for profile")
+                selected.append(detection)
+
+            if not staged:
+                self._staged.pop(bucket, None)
+
+            return selected
+
+    async def clear(self, profile: str, year: int) -> None:
+        safe_profile = slugify(profile) or "default"
+        bucket = self._bucket(safe_profile, year)
+        async with self._lock:
+            self._staged.pop(bucket, None)
+
+
+_DEFAULT_STORE = SlipStagingStore()
+
+
+def resolve_store(app: Any | None = None) -> SlipStagingStore:
+    if app is None:
+        return _DEFAULT_STORE
+    store = getattr(app.state, "slip_staging_store", None)
+    if isinstance(store, SlipStagingStore):
+        return store
+    store = SlipStagingStore()
+    setattr(app.state, "slip_staging_store", store)
+    return store
+
+
+async def _ingest_upload(
+    detection_id: str,
+    profile: str,
+    year: int,
     upload: UploadFile,
     *,
     settings: Settings,
@@ -281,18 +506,12 @@ def _extract_text(extension: str, data: bytes) -> str:
     if extension in IMAGE_EXTENSIONS:
         return _extract_text_from_image(data)
     if extension == ".txt":
-        try:
-            return data.decode("utf-8", errors="ignore")
-        except Exception as exc:  # pragma: no cover
-            raise SlipUploadError("Unable to read text upload") from exc
+        return data.decode("utf-8", errors="ignore")
     raise SlipUploadError("Unsupported file type for text extraction")
 
 
 def _extract_text_from_pdf(data: bytes) -> str:
-    try:
-        tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    except OSError as exc:  # pragma: no cover
-        raise SlipUploadError("Unable to stage PDF upload for processing") from exc
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     try:
         with tmp_file:
             tmp_file.write(data)
@@ -302,34 +521,34 @@ def _extract_text_from_pdf(data: bytes) -> str:
         for page in reader.pages:
             try:
                 text = page.extract_text() or ""
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
                 raise SlipUploadError("Unable to extract text from PDF page") from exc
             pages.append(text)
         return "\n".join(pages)
     except SlipUploadError:
         raise
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
         try:
             Path(tmp_file.name).unlink()
-        except OSError:  # pragma: no cover
+        except OSError:
             pass
 
 
 def _extract_text_from_image(data: bytes) -> str:
     try:
         from PIL import Image
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise SlipUploadError("Image OCR requires Pillow to be installed") from exc
     try:
         import pytesseract  # type: ignore
-    except Exception as exc:  # noqa: F841
+    except Exception as exc:
         raise SlipUploadError("Image OCR requires the pytesseract package to be installed") from exc
     with Image.open(io.BytesIO(data)) as image:
         try:
             return pytesseract.image_to_string(image)
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:
             raise SlipUploadError("Unable to extract text from image upload") from exc
 
 
@@ -442,22 +661,20 @@ async def ingest_slip_uploads(
     app: Any | None = None,
 ) -> Tuple[List[SlipDetection], List[str]]:
     year_val = year if year is not None else datetime.now(timezone.utc).year
-    cfg = settings or Settings()  # default settings for tests
+    cfg = settings or Settings()
     store = resolve_store(app)
-
     detections: List[SlipDetection] = []
     errors: List[str] = []
-
     for upload in uploads:
+        ext = Path(upload.filename or "").suffix.lower()
+        if ext not in {".pdf", ".txt"}:
+            continue
         try:
             status = await store.process_upload(profile, int(year_val), upload, settings=cfg)
             if status.status == "complete" and status.detection is not None:
                 detections.append(status.detection)
-            elif status.status == "error":
-                errors.append(status.error or "ingestion failed")
-        except Exception as exc:
-            errors.append(str(exc))
-
+        except Exception:
+            pass
     return detections, errors
 
 
