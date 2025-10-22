@@ -441,8 +441,22 @@ async def ingest_slip_uploads(
     detections: list[SlipDetection] = []
     errors: list[str] = []
     for upload in uploads:
-        ext = Path(upload.filename or "").suffix.lower()
-        if ext not in {".pdf", ".txt"}:
+        filename = upload.filename or ""
+        ext = Path(filename).suffix.lower()
+        if ext in IMAGE_EXTENSIONS:
+            slip_guess = "t4a" if "t4a" in filename.lower() else ("t5" if "t5" in filename.lower() else "t4")
+            det = SlipDetection(
+                id=secrets.token_hex(8),
+                slip_type=slip_guess,
+                original_filename=filename,
+                stored_filename="",
+                stored_path="",
+                size=0,
+                preview="",
+                fields={},
+                created_at=datetime.now(timezone.utc),
+            )
+            detections.append(det)
             continue
         try:
             status = await store.process_upload(profile, int(year_val), upload, settings=cfg)
