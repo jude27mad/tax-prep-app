@@ -20,6 +20,19 @@ from PyPDF2 import PdfReader
 from app.config import Settings
 from app.wizard import BASE_DIR, slugify
 
+__all__ = [
+    "ingest_slip_uploads",
+    "slip_job_status",
+    "apply_staged_detections",
+    "SlipUploadError",
+    "SlipJobNotFoundError",
+    "SlipApplyError",
+    "SlipDetection",
+    "SlipJobStatus",
+    "SlipStagingStore",
+    "resolve_store",
+]
+
 IMAGE_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -30,13 +43,14 @@ IMAGE_EXTENSIONS = {
     ".gif",
     ".webp",
 }
-
 ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
 
 MAX_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MiB cap per upload
 PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
+
+# ----------------------------- Errors & Models -------------------------------
 
 class SlipUploadError(Exception):
     """Raised when an upload fails validation or ingestion."""
@@ -52,7 +66,6 @@ class SlipApplyError(Exception):
 
 class SlipDetection(BaseModel):
     """Structured payload returned to the UI for an ingested slip."""
-
     id: str
     slip_type: str
     original_filename: str
@@ -94,6 +107,8 @@ class ApplyDetectionsRequest(BaseModel):
     detection_ids: list[str] | None = None
 
 
+# ----------------------------- In-memory Store -------------------------------
+
 class SlipStagingStore:
     """In-memory staging area for slip ingestion workflows."""
 
@@ -126,11 +141,7 @@ class SlipStagingStore:
             self._jobs[job_id] = record
         try:
             detection = await _ingest_upload(
-                job_id,
-                safe_profile,
-                year,
-                upload,
-                settings=settings,
+                job_id, safe_profile, year, upload, settings=settings
             )
         except SlipUploadError as exc:
             record.status = "error"
@@ -177,14 +188,12 @@ class SlipStagingStore:
             if not staged:
                 return []
 
-            results: list[SlipDetection]  # declare once for mypy
-
             if detection_ids is None:
                 results = list(staged.values())
                 self._staged.pop(bucket, None)
                 return results
 
-            results = []
+            results: list[SlipDetection] = []
             for detection_id in detection_ids:
                 detection = staged.pop(detection_id, None)
                 if detection is None:
@@ -207,7 +216,6 @@ _DEFAULT_STORE = SlipStagingStore()
 
 def resolve_store(app: Any | None = None) -> SlipStagingStore:
     """Return the staging store associated with the running app instance."""
-
     if app is None:
         return _DEFAULT_STORE
     store = getattr(app.state, "slip_staging_store", None)
@@ -217,6 +225,8 @@ def resolve_store(app: Any | None = None) -> SlipStagingStore:
     setattr(app.state, "slip_staging_store", store)
     return store
 
+
+# ------------------------------- Core ingest ---------------------------------
 
 async def _ingest_upload(
     detection_id: str,
@@ -238,12 +248,7 @@ async def _ingest_upload(
         raise SlipUploadError("Unable to extract text from upload")
     slip_type = _classify_slip(text)
     stored_path, stored_filename = _persist_upload(
-        settings,
-        profile,
-        year,
-        slip_type,
-        extension,
-        data,
+        settings, profile, year, slip_type, extension, data
     )
     fields = _build_detection_fields(slip_type, text)
     preview = text[:PREVIEW_LIMIT]
@@ -259,6 +264,8 @@ async def _ingest_upload(
         created_at=datetime.now(timezone.utc),
     )
 
+
+# ----------------------------- Helper functions ------------------------------
 
 def _resolve_extension(filename: str, content_type: str | None) -> str:
     extension = Path(filename).suffix.lower()
@@ -290,7 +297,7 @@ def _extract_text(extension: str, data: bytes) -> str:
 def _extract_text_from_pdf(data: bytes) -> str:
     try:
         tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    except OSError as exc:  # pragma: no cover - filesystem errors are rare
+    except OSError as exc:  # pragma: no cover
         raise SlipUploadError("Unable to stage PDF upload for processing") from exc
     try:
         with tmp_file:
@@ -301,36 +308,34 @@ def _extract_text_from_pdf(data: bytes) -> str:
         for page in reader.pages:
             try:
                 text = page.extract_text() or ""
-            except Exception as exc:  # pragma: no cover - library level errors
+            except Exception as exc:  # pragma: no cover
                 raise SlipUploadError("Unable to extract text from PDF page") from exc
             pages.append(text)
         return "\n".join(pages)
     except SlipUploadError:
         raise
-    except Exception as exc:  # pragma: no cover - defensive fallback
+    except Exception as exc:  # pragma: no cover
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
         try:
             Path(tmp_file.name).unlink()
-        except OSError:  # pragma: no cover - best effort cleanup
+        except OSError:  # pragma: no cover
             pass
 
 
 def _extract_text_from_image(data: bytes) -> str:
     try:
         from PIL import Image
-    except Exception as exc:  # pragma: no cover - Pillow is expected
+    except Exception as exc:  # pragma: no cover
         raise SlipUploadError("Image OCR requires Pillow to be installed") from exc
     try:
         import pytesseract  # type: ignore
     except Exception as exc:  # noqa: F841
-        raise SlipUploadError(
-            "Image OCR requires the pytesseract package to be installed",
-        ) from exc
+        raise SlipUploadError("Image OCR requires the pytesseract package to be installed") from exc
     with Image.open(io.BytesIO(data)) as image:
         try:
             return pytesseract.image_to_string(image)
-        except Exception as exc:  # pragma: no cover - depends on OCR backend
+        except Exception as exc:  # pragma: no cover
             raise SlipUploadError("Unable to extract text from image upload") from exc
 
 
@@ -417,6 +422,7 @@ def _keyword_pattern(keyword: str) -> str:
 
 
 def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
+    """Find the first numeric value near any of the provided keywords."""
     normalized = text.replace("\r", " ")
     for keyword in keywords:
         pattern = _keyword_pattern(keyword)
@@ -430,8 +436,8 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
             amount = Decimal(cleaned)
         except (InvalidOperation, ValueError):
             continue
-        quantized = amount.quantize(_CENT)
-        return format(quantized, "f")
+        # Use the variable directly to avoid "assigned but never used"
+        return format(amount.quantize(_CENT), "f")
     return None
 
 
