@@ -210,7 +210,7 @@ function syncExistingSlips() {
 }
 
 function addSlip(index = nextSlipIndex++) {
-  if (!slipTemplate || !slipContainer) return;
+  if (!slipTemplate || !slipContainer) return null;
   const clone = slipTemplate.content.cloneNode(true);
   clone.querySelectorAll("[name]").forEach((input) => {
     const name = input.getAttribute("name");
@@ -227,6 +227,7 @@ function addSlip(index = nextSlipIndex++) {
   }
   slipContainer.appendChild(clone);
   updateRemoveButtons();
+  return wrapper instanceof HTMLElement ? wrapper : null;
 }
 
 function updateRemoveButtons() {
@@ -320,6 +321,9 @@ function formatSize(size) {
 function statusText(entry) {
   if (entry.status === "error") {
     return entry.error || "Unable to read file";
+  }
+  if (entry.status === "applied") {
+    return "Applied to form";
   }
   if (entry.status === "ready") {
     return "Ready to apply";
@@ -658,6 +662,35 @@ function removeQueuedFile(entryId, options = {}) {
   scheduleMicrotask(() => focusQueue(preferredIndex));
 }
 
+function markDetectionsApplied(detectionIds) {
+  if (!Array.isArray(detectionIds) || detectionIds.length === 0) {
+    return;
+  }
+  const applied = new Set(detectionIds.filter((value) => typeof value === "string" && value));
+  if (applied.size === 0) {
+    return;
+  }
+  let mutated = false;
+  fileQueue.forEach((entry) => {
+    if (!entry || !entry.detection) {
+      return;
+    }
+    if (!applied.has(entry.detection.id)) {
+      return;
+    }
+    entry.status = "applied";
+    entry.error = "";
+    entry.detection = null;
+    detectionStore.delete(entry.id);
+    mutated = true;
+  });
+  if (mutated) {
+    renderQueue();
+    updateApplyState();
+    persistQueueState();
+  }
+}
+
 function applyDetections() {
   if (!applyButton || applyButton.disabled) return;
   const payload = fileQueue
@@ -942,5 +975,14 @@ function setupAutosave() {
 init();
 setupStepper();
 setupAutosave();
+
+const globalApi = getGlobalApi();
+if (globalApi) {
+  Object.assign(globalApi, {
+    addSlip,
+    syncSlips: syncExistingSlips,
+    markDetectionsApplied,
+  });
+}
 
 export { removeQueuedFile, focusQueue, applyDetections };

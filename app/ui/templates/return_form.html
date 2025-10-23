@@ -718,6 +718,16 @@
     const efileAvailabilityNote = document.getElementById("efile-availability-note");
     const transmitGateData = document.getElementById("transmit-gate-data");
     const taxYearField = form?.elements.namedItem("tax_year");
+    const slipContainer = document.getElementById("t4-slips");
+    const slipTemplate = document.getElementById("t4-slip-template");
+    const T4_FIELD_KEYS = [
+      "employment_income",
+      "tax_deducted",
+      "cpp_contrib",
+      "ei_premiums",
+      "pensionable_earnings",
+      "insurable_earnings",
+    ];
 
     let transmitGate = {};
     if (transmitGateData && transmitGateData.textContent) {
@@ -926,6 +936,266 @@
       return payload;
     }
 
+    function slipActionUrl(action) {
+      if (!form) return "";
+      const profile = form.dataset.activeProfile || "";
+      const year = form.dataset.activeYear || "";
+      if (!profile || !year) {
+        return "";
+      }
+      return `/ui/returns/${encodeURIComponent(profile)}/${encodeURIComponent(year)}/slips/${action}`;
+    }
+
+    function slipIndexForWrapper(wrapper) {
+      if (!(wrapper instanceof HTMLElement)) {
+        return null;
+      }
+      if (wrapper.dataset.slipIndex) {
+        return wrapper.dataset.slipIndex;
+      }
+      const input = wrapper.querySelector('[name^="slips_t4-"]');
+      if (input instanceof HTMLInputElement) {
+        const match = input.name.match(/^slips_t4-(\d+)-/);
+        if (match) {
+          wrapper.dataset.slipIndex = match[1];
+          return match[1];
+        }
+      }
+      return null;
+    }
+
+    function slipInputsAreBlank(wrapper, fields) {
+      const slipIndex = slipIndexForWrapper(wrapper);
+      if (slipIndex === null) {
+        return false;
+      }
+      return fields.every((field) => {
+        const selector = `[name="slips_t4-${slipIndex}-${field}"]`;
+        const input = wrapper.querySelector(selector);
+        if (!(input instanceof HTMLInputElement)) {
+          return true;
+        }
+        return String(input.value || "").trim() === "";
+      });
+    }
+
+    function computeNextSlipIndex() {
+      if (!slipContainer) return 0;
+      const indices = Array.from(slipContainer.querySelectorAll(".t4-slip"))
+        .map((node) => Number.parseInt(node.dataset.slipIndex || "", 10))
+        .filter((value) => !Number.isNaN(value));
+      if (indices.length === 0) {
+        return 0;
+      }
+      return Math.max(...indices) + 1;
+    }
+
+    function manualAddSlip(index) {
+      if (!slipTemplate || !slipContainer) {
+        return null;
+      }
+      const fragment = slipTemplate.content.cloneNode(true);
+      fragment.querySelectorAll("[name]").forEach((input) => {
+        const name = input.getAttribute("name");
+        if (!name) return;
+        input.setAttribute("name", name.replace(/__index__/g, String(index)));
+      });
+      const wrapper = fragment.querySelector(".t4-slip");
+      if (wrapper) {
+        wrapper.dataset.slipIndex = String(index);
+        const numberSpan = wrapper.querySelector(".slip-number");
+        if (numberSpan) {
+          numberSpan.textContent = index + 1;
+        }
+      }
+      slipContainer.appendChild(fragment);
+      if (typeof window !== "undefined") {
+        const api = window.__returnForm;
+        if (api && typeof api.syncSlips === "function") {
+          api.syncSlips();
+        }
+      }
+      return wrapper instanceof HTMLElement ? wrapper : null;
+    }
+
+    function createSlipForDetection() {
+      if (typeof window !== "undefined") {
+        const api = window.__returnForm;
+        if (api && typeof api.addSlip === "function") {
+          const created = api.addSlip();
+          if (created instanceof HTMLElement) {
+            return created;
+          }
+        }
+      }
+      return manualAddSlip(computeNextSlipIndex());
+    }
+
+    function ensureSlipForDetection(detection) {
+      if (!slipContainer || !detection || typeof detection !== "object") {
+        return null;
+      }
+      const detectionId = typeof detection.id === "string" ? detection.id : "";
+      if (!detectionId) {
+        return null;
+      }
+      const existing = slipContainer.querySelector(`.t4-slip[data-detection-id="${detectionId}"]`);
+      if (existing instanceof HTMLElement) {
+        return existing;
+      }
+      const wrappers = Array.from(slipContainer.querySelectorAll(".t4-slip"));
+      const blank = wrappers.find((wrapper) => {
+        if (!(wrapper instanceof HTMLElement)) {
+          return false;
+        }
+        if (wrapper.dataset.detectionId) {
+          return false;
+        }
+        return slipInputsAreBlank(wrapper, T4_FIELD_KEYS);
+      });
+      if (blank instanceof HTMLElement) {
+        return blank;
+      }
+      return createSlipForDetection();
+    }
+
+    function setSlipValues(wrapper, values) {
+      if (!wrapper || typeof values !== "object") {
+        return;
+      }
+      const slipIndex = slipIndexForWrapper(wrapper);
+      if (slipIndex === null) {
+        return;
+      }
+      Object.entries(values).forEach(([field, rawValue]) => {
+        if (!T4_FIELD_KEYS.includes(field)) {
+          return;
+        }
+        let normalized = rawValue;
+        if (typeof normalized === "number") {
+          normalized = normalized.toString();
+        }
+        if (typeof normalized !== "string") {
+          return;
+        }
+        const value = normalized.trim();
+        if (value === "") {
+          return;
+        }
+        const input = wrapper.querySelector(`[name="slips_t4-${slipIndex}-${field}"]`);
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        if (input.value === value) {
+          return;
+        }
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    function applyT4DetectionsFromResponse(detections) {
+      const applied = [];
+      if (!Array.isArray(detections)) {
+        return applied;
+      }
+      detections.forEach((detection) => {
+        if (!detection || typeof detection !== "object") {
+          return;
+        }
+        const detectionId = typeof detection.id === "string" ? detection.id : "";
+        if (!detectionId) {
+          return;
+        }
+        const slipType = String(detection.slip_type || "").toLowerCase();
+        if (slipType !== "t4") {
+          console.warn(`Skipping detection ${detectionId}: unsupported slip type`, slipType);
+          return;
+        }
+        const wrapper = ensureSlipForDetection(detection);
+        if (!wrapper) {
+          console.warn(`Unable to allocate slip for detection ${detectionId}`);
+          return;
+        }
+        wrapper.dataset.detectionId = detectionId;
+        const fields = detection.fields && typeof detection.fields === "object" ? detection.fields : {};
+        setSlipValues(wrapper, fields);
+        applied.push(detectionId);
+      });
+      return applied;
+    }
+
+    async function handleT4DetectionsApply(event) {
+      if (!event || typeof event !== "object" || !("detail" in event)) {
+        return;
+      }
+      const detail = event.detail;
+      const queuedDetections = Array.isArray(detail?.detections) ? detail.detections : [];
+      if (queuedDetections.length === 0) {
+        return;
+      }
+      const detectionIds = Array.from(
+        new Set(
+          queuedDetections
+            .map((item) =>
+              item && typeof item === "object" && typeof item.id === "string" ? item.id : null
+            )
+            .filter(Boolean)
+        )
+      );
+      if (detectionIds.length === 0) {
+        return;
+      }
+      const applyUrl = slipActionUrl("apply");
+      if (!applyUrl) {
+        console.warn("Cannot apply detections without an active profile and tax year.");
+        return;
+      }
+      let responseData = null;
+      try {
+        const response = await fetch(applyUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ detection_ids: detectionIds }),
+        });
+        try {
+          responseData = await response.json();
+        } catch (parseError) {
+          responseData = null;
+        }
+        if (!response.ok) {
+          const message =
+            (responseData && typeof responseData === "object" && responseData?.detail) ||
+            `Failed to apply slip detections (${response.status})`;
+          throw new Error(typeof message === "string" ? message : "Unable to apply slip detections");
+        }
+      } catch (error) {
+        console.error("Unable to apply slip detections", error);
+        return;
+      }
+      const appliedIds = applyT4DetectionsFromResponse(
+        responseData && typeof responseData === "object" ? responseData.detections : []
+      );
+      if (appliedIds.length === 0) {
+        console.warn("No T4 detections were applied to the form.");
+      }
+      if (typeof window !== "undefined") {
+        const api = window.__returnForm;
+        if (api && typeof api.markDetectionsApplied === "function") {
+          api.markDetectionsApplied(detectionIds);
+        }
+      }
+      const clearUrl = slipActionUrl("clear");
+      if (clearUrl) {
+        try {
+          await fetch(clearUrl, { method: "POST" });
+        } catch (error) {
+          console.warn("Unable to clear staged slip detections", error);
+        }
+      }
+    }
+
     function updateCalcTables(calc) {
       if (!calcTotalsBody) return;
       if (!calc || !calc.totals) {
@@ -1084,6 +1354,9 @@
 
     if (form) {
       form.addEventListener("submit", handlePrepare);
+      form.addEventListener("t4-detections-apply", (event) => {
+        void handleT4DetectionsApply(event);
+      });
     }
     printButton?.addEventListener("click", handlePrint);
     efileButton?.addEventListener("click", handleEfile);
