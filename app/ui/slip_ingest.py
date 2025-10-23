@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 
 from fastapi import UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from PyPDF2 import PdfReader
 
 from app.config import Settings
@@ -63,6 +63,7 @@ class SlipApplyError(Exception):
 
 
 class SlipDetection(BaseModel):
+    model_config = ConfigDict(extra="allow")
     id: str
     slip_type: str
     original_filename: str
@@ -71,6 +72,7 @@ class SlipDetection(BaseModel):
     size: int
     preview: str = Field(default="")
     fields: dict[str, str] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -252,6 +254,7 @@ async def _ingest_upload(
         size=size,
         preview=preview,
         fields=fields,
+        warnings=[],
         created_at=datetime.now(timezone.utc),
     )
 
@@ -454,9 +457,14 @@ async def ingest_slip_uploads(
                 size=0,
                 preview="",
                 fields={},
+                warnings=["Unsupported image format for text extraction; OCR skipped"],
                 created_at=datetime.now(timezone.utc),
             )
             detections.append(det)
+            try:
+                await upload.close()
+            except Exception:
+                pass
             continue
         try:
             status = await store.process_upload(profile, int(year_val), upload, settings=cfg)
@@ -487,3 +495,4 @@ async def apply_staged_detections(
 ) -> list[SlipDetection]:
     store = resolve_store(app)
     return await store.apply(profile, year, detection_ids)
+
