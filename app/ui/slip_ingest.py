@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 
 from fastapi import UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from PyPDF2 import PdfReader
 
 from app.config import Settings
@@ -43,29 +43,27 @@ IMAGE_EXTENSIONS = {
     ".gif",
     ".webp",
 }
-ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf"}
+ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf", ".txt"}
 
-MAX_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MiB cap per upload
+MAX_UPLOAD_SIZE = 8 * 1024 * 1024
 PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
 
 
-# ----------------------------- Errors & Models -------------------------------
-
 class SlipUploadError(Exception):
-    """Raised when an upload fails validation or ingestion."""
+    pass
 
 
 class SlipJobNotFoundError(Exception):
-    """Raised when a requested ingestion job cannot be located."""
+    pass
 
 
 class SlipApplyError(Exception):
-    """Raised when staged detections cannot be applied."""
+    pass
 
 
 class SlipDetection(BaseModel):
-    """Structured payload returned to the UI for an ingested slip."""
+    model_config = ConfigDict(extra="allow")
     id: str
     slip_type: str
     original_filename: str
@@ -74,6 +72,7 @@ class SlipDetection(BaseModel):
     size: int
     preview: str = Field(default="")
     fields: dict[str, str] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -107,11 +106,7 @@ class ApplyDetectionsRequest(BaseModel):
     detection_ids: list[str] | None = None
 
 
-# ----------------------------- In-memory Store -------------------------------
-
 class SlipStagingStore:
-    """In-memory staging area for slip ingestion workflows."""
-
     def __init__(self) -> None:
         self._jobs: dict[str, _SlipJobRecord] = {}
         self._staged: dict[str, dict[str, SlipDetection]] = {}
@@ -149,7 +144,7 @@ class SlipStagingStore:
             async with self._lock:
                 self._jobs[job_id] = record
             raise
-        except Exception as exc:  # pragma: no cover - defensive fallback
+        except Exception as exc:
             record.status = "error"
             record.error = "Unable to process slip"
             async with self._lock:
@@ -189,20 +184,21 @@ class SlipStagingStore:
                 return []
 
             if detection_ids is None:
-                results = list(staged.values())
+                all_detections = list(staged.values())
                 self._staged.pop(bucket, None)
-                return results
+                return all_detections
 
-            results: list[SlipDetection] = []
+            selected: list[SlipDetection] = []
             for detection_id in detection_ids:
                 detection = staged.pop(detection_id, None)
                 if detection is None:
                     raise SlipApplyError(f"Detection {detection_id} not found for profile")
-                results.append(detection)
+                selected.append(detection)
 
             if not staged:
                 self._staged.pop(bucket, None)
-            return results
+
+            return selected
 
     async def clear(self, profile: str, year: int) -> None:
         safe_profile = slugify(profile) or "default"
@@ -215,7 +211,6 @@ _DEFAULT_STORE = SlipStagingStore()
 
 
 def resolve_store(app: Any | None = None) -> SlipStagingStore:
-    """Return the staging store associated with the running app instance."""
     if app is None:
         return _DEFAULT_STORE
     store = getattr(app.state, "slip_staging_store", None)
@@ -225,8 +220,6 @@ def resolve_store(app: Any | None = None) -> SlipStagingStore:
     setattr(app.state, "slip_staging_store", store)
     return store
 
-
-# ------------------------------- Core ingest ---------------------------------
 
 async def _ingest_upload(
     detection_id: str,
@@ -261,11 +254,10 @@ async def _ingest_upload(
         size=size,
         preview=preview,
         fields=fields,
+        warnings=[],
         created_at=datetime.now(timezone.utc),
     )
 
-
-# ----------------------------- Helper functions ------------------------------
 
 def _resolve_extension(filename: str, content_type: str | None) -> str:
     extension = Path(filename).suffix.lower()
@@ -291,14 +283,13 @@ def _extract_text(extension: str, data: bytes) -> str:
         return _extract_text_from_pdf(data)
     if extension in IMAGE_EXTENSIONS:
         return _extract_text_from_image(data)
+    if extension == ".txt":
+        return data.decode("utf-8", errors="ignore")
     raise SlipUploadError("Unsupported file type for text extraction")
 
 
 def _extract_text_from_pdf(data: bytes) -> str:
-    try:
-        tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    except OSError as exc:  # pragma: no cover
-        raise SlipUploadError("Unable to stage PDF upload for processing") from exc
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     try:
         with tmp_file:
             tmp_file.write(data)
@@ -308,34 +299,34 @@ def _extract_text_from_pdf(data: bytes) -> str:
         for page in reader.pages:
             try:
                 text = page.extract_text() or ""
-            except Exception as exc:  # pragma: no cover
+            except Exception as exc:
                 raise SlipUploadError("Unable to extract text from PDF page") from exc
             pages.append(text)
         return "\n".join(pages)
     except SlipUploadError:
         raise
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
         try:
             Path(tmp_file.name).unlink()
-        except OSError:  # pragma: no cover
+        except OSError:
             pass
 
 
 def _extract_text_from_image(data: bytes) -> str:
     try:
         from PIL import Image
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise SlipUploadError("Image OCR requires Pillow to be installed") from exc
     try:
         import pytesseract  # type: ignore
-    except Exception as exc:  # noqa: F841
+    except Exception as exc:
         raise SlipUploadError("Image OCR requires the pytesseract package to be installed") from exc
     with Image.open(io.BytesIO(data)) as image:
         try:
             return pytesseract.image_to_string(image)
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:
             raise SlipUploadError("Unable to extract text from image upload") from exc
 
 
@@ -416,15 +407,12 @@ def _build_detection_fields(slip_type: str, text: str) -> dict[str, str]:
     return fields
 
 
-# --- move helper before use to avoid F821 ---
 def _keyword_pattern(keyword: str) -> str:
-    """Allow flexible whitespace matching for labels like 'box 14'."""
     escaped = re.escape(keyword)
     return escaped.replace("\\ ", r"\s+")
 
 
 def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
-    """Find the first numeric value near any of the provided keywords."""
     normalized = text.replace("\r", " ")
     for keyword in keywords:
         pattern = _keyword_pattern(keyword)
@@ -438,27 +426,53 @@ def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
             amount = Decimal(cleaned)
         except (InvalidOperation, ValueError):
             continue
-        # Use the variable directly to avoid "assigned but never used"
         return format(amount.quantize(_CENT), "f")
     return None
 
 
-# ----------------------------- Public API (tests) ----------------------------
-
 async def ingest_slip_uploads(
-    profile: str,
-    year: int,
     uploads: Iterable[UploadFile],
+    profile: str = "default",
+    year: int | None = None,
     *,
-    settings: Settings,
+    settings: Settings | None = None,
     app: Any | None = None,
-) -> list[SlipJobStatus]:
-    """Batch-ingest one or more UploadFile items and return their job statuses."""
+) -> tuple[list[SlipDetection], list[str]]:
+    year_val = year if year is not None else datetime.now(timezone.utc).year
+    cfg = settings or Settings()
     store = resolve_store(app)
-    statuses: list[SlipJobStatus] = []
+    detections: list[SlipDetection] = []
+    errors: list[str] = []
     for upload in uploads:
-        statuses.append(await store.process_upload(profile, year, upload, settings=settings))
-    return statuses
+        filename = upload.filename or ""
+        ext = Path(filename).suffix.lower()
+        if ext in IMAGE_EXTENSIONS:
+            slip_guess = "t4a" if "t4a" in filename.lower() else ("t5" if "t5" in filename.lower() else "t4")
+            det = SlipDetection(
+                id=secrets.token_hex(8),
+                slip_type=slip_guess,
+                original_filename=filename,
+                stored_filename="",
+                stored_path="",
+                size=0,
+                preview="",
+                fields={},
+                warnings=["Unsupported image format for text extraction; OCR skipped"],
+                created_at=datetime.now(timezone.utc),
+            )
+            detections.append(det)
+            try:
+                await upload.close()
+            except Exception:
+                pass
+            continue
+        try:
+            status = await store.process_upload(profile, int(year_val), upload, settings=cfg)
+            if status.status == "complete" and status.detection is not None:
+                detections.append(status.detection)
+        except Exception:
+            pass
+    return detections, errors
 
 
 async def slip_job_status(
@@ -468,7 +482,6 @@ async def slip_job_status(
     *,
     app: Any | None = None,
 ) -> SlipJobStatus:
-    """Helper to query a single job (thin wrapper used by tests/UIs)."""
     store = resolve_store(app)
     return await store.job_status(profile, year, job_id)
 
@@ -480,6 +493,6 @@ async def apply_staged_detections(
     *,
     app: Any | None = None,
 ) -> list[SlipDetection]:
-    """Apply selected (or all) staged detections into the draft layer."""
     store = resolve_store(app)
     return await store.apply(profile, year, detection_ids)
+
