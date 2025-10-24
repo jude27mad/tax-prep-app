@@ -7,6 +7,7 @@ import mimetypes
 import re
 import secrets
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -313,7 +314,8 @@ def _extract_text_from_pdf(data: bytes) -> str:
     except Exception as exc:
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
-        tmp_path.unlink(missing_ok=True)
+        with suppress(OSError):
+            tmp_path.unlink()
 
 
 def _extract_text_from_image(data: bytes) -> str:
