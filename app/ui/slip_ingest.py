@@ -282,18 +282,18 @@ def _extract_text(extension: str, data: bytes) -> str:
     if extension == ".pdf":
         return _extract_text_from_pdf(data)
     if extension in IMAGE_EXTENSIONS:
-        return _extract_text_from_image(data)
+        return _clean_extracted_text(_extract_text_from_image(data))
     if extension == ".txt":
-        return data.decode("utf-8", errors="ignore")
+        return _clean_extracted_text(data.decode("utf-8", errors="ignore"))
     raise SlipUploadError("Unsupported file type for text extraction")
 
 
 def _extract_text_from_pdf(data: bytes) -> str:
     tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp_path = Path(tmp_file.name)
     try:
         with tmp_file:
             tmp_file.write(data)
-            tmp_path = Path(tmp_file.name)
         reader = PdfReader(tmp_path)
         pages: list[str] = []
         for page in reader.pages:
@@ -302,16 +302,18 @@ def _extract_text_from_pdf(data: bytes) -> str:
             except Exception as exc:
                 raise SlipUploadError("Unable to extract text from PDF page") from exc
             pages.append(text)
-        return "\n".join(pages)
+        extracted = _clean_extracted_text("\n".join(pages))
+        if extracted:
+            return extracted
+        images = _rasterize_pdf(data)
+        ocr_text = _perform_pdf_ocr(images)
+        return _clean_extracted_text("\n".join(ocr_text))
     except SlipUploadError:
         raise
     except Exception as exc:
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
-        try:
-            Path(tmp_file.name).unlink()
-        except OSError:
-            pass
+        tmp_path.unlink(missing_ok=True)
 
 
 def _extract_text_from_image(data: bytes) -> str:
@@ -328,6 +330,53 @@ def _extract_text_from_image(data: bytes) -> str:
             return pytesseract.image_to_string(image)
         except Exception as exc:
             raise SlipUploadError("Unable to extract text from image upload") from exc
+
+
+def _clean_extracted_text(text: str) -> str:
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", "", text)
+    return cleaned.strip()
+
+
+def _rasterize_pdf(data: bytes) -> list[Any]:
+    try:
+        from pdf2image import convert_from_bytes
+    except Exception as exc:
+        raise SlipUploadError("PDF OCR requires the pdf2image package to be installed") from exc
+    try:
+        return convert_from_bytes(
+            data,
+            dpi=200,
+            size=(2048, None),
+            fmt="png",
+            thread_count=1,
+            use_cropbox=True,
+        )
+    except Exception as exc:
+        raise SlipUploadError("Unable to rasterize PDF for OCR") from exc
+
+
+def _perform_pdf_ocr(images: Iterable[Any]) -> list[str]:
+    try:
+        import pytesseract  # type: ignore
+    except Exception as exc:
+        raise SlipUploadError("PDF OCR requires the pytesseract package to be installed") from exc
+
+    texts: list[str] = []
+    for index, image in enumerate(images, start=1):
+        try:
+            texts.append(pytesseract.image_to_string(image))
+        except Exception as exc:
+            raise SlipUploadError(
+                f"Unable to OCR rasterized PDF page {index}"
+            ) from exc
+        finally:
+            closer = getattr(image, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
+    return texts
 
 
 def _classify_slip(text: str) -> str:
