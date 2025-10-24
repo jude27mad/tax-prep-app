@@ -15,7 +15,7 @@ from playwright.sync_api import expect
 
 import app.wizard as wizard
 from app.config import get_settings
-from app.ui import router as ui_router
+import app.ui.router as ui_router_module
 from app.ui import slip_ingest
 from app.wizard import profiles
 
@@ -53,8 +53,8 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
         "DEFAULT_PROFILE_FILE": profiles.DEFAULT_PROFILE_FILE,
     }
     original_wizard_base = wizard.BASE_DIR
-    original_router_base = ui_router.BASE_DIR
-    original_router_drafts = ui_router.PROFILE_DRAFTS_ROOT
+    original_router_base = ui_router_module.BASE_DIR
+    original_router_drafts = ui_router_module.PROFILE_DRAFTS_ROOT
     original_slip_ingest_base = slip_ingest.BASE_DIR
     original_default_store = slip_ingest._DEFAULT_STORE  # type: ignore[attr-defined]
     server: uvicorn.Server | None = None
@@ -74,8 +74,8 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
         profiles.PROFILE_HISTORY_DIR = profiles.PROFILES_DIR / "history"
         profiles.PROFILE_TRASH_DIR = profiles.PROFILES_DIR / ".trash"
         profiles.DEFAULT_PROFILE_FILE = profiles.PROFILES_DIR / "active_profile.txt"
-        ui_router.BASE_DIR = base_dir
-        ui_router.PROFILE_DRAFTS_ROOT = profiles.PROFILES_DIR
+        ui_router_module.BASE_DIR = base_dir
+        ui_router_module.PROFILE_DRAFTS_ROOT = profiles.PROFILES_DIR
         slip_ingest.BASE_DIR = base_dir
         slip_ingest._DEFAULT_STORE = slip_ingest.SlipStagingStore()  # type: ignore[attr-defined]
 
@@ -87,7 +87,7 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
         profiles.save_profile_data("playwright-smoke", {"province": "ON", "tax_year": 2025})
 
         app = FastAPI()
-        app.include_router(ui_router.router)
+        app.include_router(ui_router_module.router)
         app.state.slip_staging_store = slip_ingest.SlipStagingStore()
         app.state.settings = settings
 
@@ -131,8 +131,8 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
         profiles.PROFILE_HISTORY_DIR = original_profiles["PROFILE_HISTORY_DIR"]
         profiles.PROFILE_TRASH_DIR = original_profiles["PROFILE_TRASH_DIR"]
         profiles.DEFAULT_PROFILE_FILE = original_profiles["DEFAULT_PROFILE_FILE"]
-        ui_router.BASE_DIR = original_router_base
-        ui_router.PROFILE_DRAFTS_ROOT = original_router_drafts
+        ui_router_module.BASE_DIR = original_router_base
+        ui_router_module.PROFILE_DRAFTS_ROOT = original_router_drafts
         slip_ingest.BASE_DIR = original_slip_ingest_base
         slip_ingest._DEFAULT_STORE = original_default_store  # type: ignore[attr-defined]
         get_settings.cache_clear()
