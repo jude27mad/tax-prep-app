@@ -39,15 +39,14 @@ from app.wizard import (
     slugify,
 )
 
-class UIRouter(APIRouter):
-    BASE_DIR: Path
+BASE_DIR = WIZARD_BASE_DIR
 
-router = UIRouter(prefix="/ui", tags=["ui"])
-router.BASE_DIR = WIZARD_BASE_DIR
+router = APIRouter(prefix="/ui", tags=["ui"])
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
 STATIC_ROOT = UI_ROOT / "static"
+PROFILE_DRAFTS_ROOT = BASE_DIR / "profiles"
 
 FORM_STEPS: list[dict[str, str]] = [
     {"slug": "identity", "label": "Identity"},
@@ -60,77 +59,6 @@ FORM_STEP_SLUGS = {step["slug"] for step in FORM_STEPS}
 DEFAULT_FORM_STEP = FORM_STEPS[0]["slug"]
 AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
-
-
-def _get_base_dir() -> Path:
-    return router.BASE_DIR
-
-
-@router.get("/static/{path:path}", name="ui_static")
-async def serve_ui_static(path: str) -> FileResponse:
-    target_path = (STATIC_ROOT / path).resolve()
-    try:
-        target_path.relative_to(STATIC_ROOT.resolve())
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Static asset not found") from exc
-    if not target_path.is_file():
-        raise HTTPException(status_code=404, detail="Static asset not found")
-    return FileResponse(target_path)
-
-
-FIELD_METADATA: dict[str, dict[str, Any]] = {
-    "full_name": {"label": "Full name", "optional": True, "placeholder": "Optional"},
-    "province": {
-        "label": "Province",
-        "optional": True,
-        "placeholder": "ON, BC, AB...",
-    },
-    "box14": {
-        "label": "Employment income (T4 box 14)",
-        "help": "Total employment income reported on the T4.",
-        "inputmode": "decimal",
-    },
-    "box22": {
-        "label": "Income tax deducted (T4 box 22)",
-        "help": "Federal and provincial income tax withheld at source.",
-        "inputmode": "decimal",
-    },
-    "box16": {
-        "label": "CPP contributions (T4 box 16)",
-        "inputmode": "decimal",
-    },
-    "box16a": {
-        "label": "CPP2 contributions (T4 box 16A)",
-        "optional": True,
-        "inputmode": "decimal",
-    },
-    "box18": {
-        "label": "EI premiums (T4 box 18)",
-        "inputmode": "decimal",
-    },
-    "rrsp": {
-        "label": "RRSP deductions claimed",
-        "optional": True,
-        "default": 0.0,
-        "inputmode": "decimal",
-    },
-    "filing_status": {
-        "label": "Filing status",
-        "optional": True,
-        "placeholder": "Single, married, etc.",
-    },
-    "dependents": {
-        "label": "Have dependents?",
-        "optional": True,
-        "input_type": "checkbox",
-    },
-    "num_dependents": {
-        "label": "Number of dependents",
-        "optional": True,
-        "inputmode": "numeric",
-        "min": 0,
-    },
-}
 
 
 def _format_currency(value: float | int) -> str:
@@ -160,10 +88,9 @@ def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[st
 
 
 def _friendly_profile_path(slug: str) -> str:
-    base_dir = _get_base_dir()
-    profile_path = base_dir / "profiles" / f"{slug}.toml"
+    profile_path = BASE_DIR / "profiles" / f"{slug}.toml"
     try:
-        return str(profile_path.relative_to(base_dir))
+        return str(profile_path.relative_to(BASE_DIR))
     except ValueError:
         return str(profile_path)
 
@@ -337,7 +264,7 @@ def _normalize_step(step: str | None) -> str:
 
 
 def _profile_draft_dir(slug: str) -> Path:
-    return (_get_base_dir() / "profiles" / slug).resolve()
+    return (PROFILE_DRAFTS_ROOT / slug).resolve()
 
 
 def _profile_draft_path(slug: str) -> Path:
@@ -631,7 +558,7 @@ def _resolve_artifact_root(request: Request) -> Path:
     else:
         root_path = Path("artifacts")
     if not root_path.is_absolute():
-        root_path = (_get_base_dir() / root_path).resolve()
+        root_path = (BASE_DIR / root_path).resolve()
     return root_path
 
 
@@ -770,9 +697,8 @@ def _t183_consent_context(
 
 
 def _relative_artifact_label(path: Path) -> str:
-    base_dir = _get_base_dir()
     try:
-        return str(path.relative_to(base_dir))
+        return str(path.relative_to(BASE_DIR))
     except ValueError:
         return str(path)
 
