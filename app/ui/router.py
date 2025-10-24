@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, Response, Up
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ValidationError, field_validator
-from starlette.datastructures import UploadFile as StarletteUploadFile  # for type-narrowing form inputs
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config import Settings, get_settings
 from app.core.models import ReturnInput
@@ -19,7 +19,7 @@ from app.efile.gating import build_transmit_gate
 from app.efile.t183 import RETENTION_YEARS, build_record, mask_sin, store_signed
 from app.ui import slip_ingest
 from app.wizard import (
-    BASE_DIR,
+    BASE_DIR as WIZARD_BASE_DIR,
     CLI_BOOL_FIELDS,
     CLI_NUMERIC_FIELDS,
     CLI_SAVE_ORDER,
@@ -40,11 +40,11 @@ from app.wizard import (
 )
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+router.BASE_DIR = WIZARD_BASE_DIR
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
 STATIC_ROOT = UI_ROOT / "static"
-PROFILE_DRAFTS_ROOT = BASE_DIR / "profiles"
 
 FORM_STEPS: list[dict[str, str]] = [
     {"slug": "identity", "label": "Identity"},
@@ -57,6 +57,15 @@ FORM_STEP_SLUGS = {step["slug"] for step in FORM_STEPS}
 DEFAULT_FORM_STEP = FORM_STEPS[0]["slug"]
 AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
+
+
+def _get_base_dir() -> Path:
+    raw = getattr(router, "BASE_DIR", None)
+    if isinstance(raw, Path):
+        return raw
+    if isinstance(raw, str):
+        return Path(raw)
+    return WIZARD_BASE_DIR
 
 
 @router.get("/static/{path:path}", name="ui_static")
@@ -153,9 +162,10 @@ def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[st
 
 
 def _friendly_profile_path(slug: str) -> str:
-    profile_path = BASE_DIR / "profiles" / f"{slug}.toml"
+    base_dir = _get_base_dir()
+    profile_path = base_dir / "profiles" / f"{slug}.toml"
     try:
-        return str(profile_path.relative_to(BASE_DIR))
+        return str(profile_path.relative_to(base_dir))
     except ValueError:
         return str(profile_path)
 
@@ -329,7 +339,7 @@ def _normalize_step(step: str | None) -> str:
 
 
 def _profile_draft_dir(slug: str) -> Path:
-    return (PROFILE_DRAFTS_ROOT / slug).resolve()
+    return (_get_base_dir() / "profiles" / slug).resolve()
 
 
 def _profile_draft_path(slug: str) -> Path:
@@ -624,7 +634,7 @@ def _resolve_artifact_root(request: Request) -> Path:
     else:
         root_path = Path("artifacts")
     if not root_path.is_absolute():
-        root_path = (BASE_DIR / root_path).resolve()
+        root_path = (_get_base_dir() / root_path).resolve()
     return root_path
 
 
@@ -677,7 +687,7 @@ def _collect_t183_records(request: Request, slug: str) -> tuple[list[dict[str, A
         for meta_path in sorted(target_dir.glob("t183_*.json"), reverse=True):
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):  # pragma: no cover - corrupt metadata skipped
+            except (OSError, json.JSONDecodeError):
                 continue
             profile_ref = meta.get("profile")
             if profile_ref and profile_ref != slug:
@@ -708,7 +718,7 @@ def _collect_t183_records(request: Request, slug: str) -> tuple[list[dict[str, A
                 record["download_url"] = request.url_for(
                     "ui_t183_download", slug=slug, record_id=record_id
                 )
-            except Exception:  # pragma: no cover - url_for may fail if router not mounted
+            except Exception:
                 record["download_url"] = None
             records.append(record)
     records.sort(key=lambda entry: entry.get("signed_at") or "", reverse=True)
@@ -734,7 +744,6 @@ def _t183_consent_context(
     sin = str(taxpayer_state.get("sin", "") or "").strip()
     tax_year = state.get("tax_year") if isinstance(state, dict) else ""
 
-    # Safely coerce tax_year to text for display
     try:
         tax_year_text = str(int(cast(int | str, tax_year)))
     except (TypeError, ValueError):
@@ -764,8 +773,9 @@ def _t183_consent_context(
 
 
 def _relative_artifact_label(path: Path) -> str:
+    base_dir = _get_base_dir()
     try:
-        return str(path.relative_to(BASE_DIR))
+        return str(path.relative_to(base_dir))
     except ValueError:
         return str(path)
 
@@ -898,7 +908,6 @@ async def _persist_t183_consent(
     target_dir = retention_root / f"{tax_year}" / last_four
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = int(datetime.now(timezone.utc).timestamp())
-    # Ensure unique filenames
     while True:
         base_name = f"t183_{timestamp}"
         summary_path = target_dir / f"{base_name}.txt"
