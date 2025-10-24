@@ -60,6 +60,40 @@ DEFAULT_FORM_STEP = FORM_STEPS[0]["slug"]
 AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
 
+FIELD_METADATA: dict[str, dict[str, Any]] = {
+    "full_name": {"label": "Full name", "optional": True, "placeholder": "Optional"},
+    "province": {"label": "Province", "optional": True, "placeholder": "ON, BC, AB..."},
+    "box14": {
+        "label": "Employment income (T4 box 14)",
+        "help": "Total employment income reported on the T4.",
+        "inputmode": "decimal",
+    },
+    "box22": {
+        "label": "Income tax deducted (T4 box 22)",
+        "help": "Federal and provincial income tax withheld at source.",
+        "inputmode": "decimal",
+    },
+    "box16": {"label": "CPP contributions (T4 box 16)", "inputmode": "decimal"},
+    "box16a": {"label": "CPP2 contributions (T4 box 16A)", "optional": True, "inputmode": "decimal"},
+    "box18": {"label": "EI premiums (T4 box 18)", "inputmode": "decimal"},
+    "rrsp": {"label": "RRSP deductions claimed", "optional": True, "default": 0.0, "inputmode": "decimal"},
+    "filing_status": {"label": "Filing status", "optional": True, "placeholder": "Single, married, etc."},
+    "dependents": {"label": "Have dependents?", "optional": True, "input_type": "checkbox"},
+    "num_dependents": {"label": "Number of dependents", "optional": True, "inputmode": "numeric", "min": 0},
+}
+
+
+@router.get("/static/{path:path}", name="ui_static")
+async def serve_ui_static(path: str) -> FileResponse:
+    target_path = (STATIC_ROOT / path).resolve()
+    try:
+        target_path.relative_to(STATIC_ROOT.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Static asset not found") from exc
+    if not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Static asset not found")
+    return FileResponse(target_path)
+
 
 def _format_currency(value: float | int) -> str:
     return f"${value:,.2f}"
@@ -880,9 +914,7 @@ async def _persist_t183_consent(
         "masked_sin": record.taxpayer_sin_masked,
         "signed_at": record.signed_at.isoformat(),
         "filed_at": record.filed_at.isoformat(),
-        "esign_accepted_at": record.esign_accepted_at.isoformat()
-        if record.esign_accepted_at
-        else None,
+        "esign_accepted_at": record.esign_accepted_at.isoformat() if record.esign_accepted_at else None,
         "ip_hash": record.ip_hash,
         "user_agent_hash": record.user_agent_hash,
         "summary_path": str(summary_path),
@@ -926,8 +958,7 @@ async def submit_t183_consent(request: Request, slug: str) -> Response:
     form_data.update(
         {
             "signature_name": signature,
-            "attestation_text": form_data.get("attestation_text")
-            or "Client consented to Form T183 electronic filing.",
+            "attestation_text": form_data.get("attestation_text") or "Client consented to Form T183 electronic filing.",
             "ip": request.client.host if request.client else "",
             "user_agent": request.headers.get("user-agent", ""),
         }
@@ -966,7 +997,7 @@ def download_t183_record(request: Request, slug: str, record_id: str) -> FileRes
         raise HTTPException(status_code=404, detail="No T183 records found for this profile")
     retention_root = _t183_retention_root(request)
     last_four = sin[-4:]
-    candidate_dirs = []
+    candidate_dirs: list[Path] = []
     if retention_root.exists():
         for year_dir in retention_root.iterdir():
             if not year_dir.is_dir():
