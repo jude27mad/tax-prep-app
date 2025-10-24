@@ -39,7 +39,10 @@ from app.wizard import (
     slugify,
 )
 
-router = APIRouter(prefix="/ui", tags=["ui"])
+class UIRouter(APIRouter):
+    BASE_DIR: Path
+
+router = UIRouter(prefix="/ui", tags=["ui"])
 router.BASE_DIR = WIZARD_BASE_DIR
 
 UI_ROOT = Path(__file__).resolve().parent
@@ -60,12 +63,7 @@ T183_RETENTION_DIRNAME = "t183"
 
 
 def _get_base_dir() -> Path:
-    raw = getattr(router, "BASE_DIR", None)
-    if isinstance(raw, Path):
-        return raw
-    if isinstance(raw, str):
-        return Path(raw)
-    return WIZARD_BASE_DIR
+    return router.BASE_DIR
 
 
 @router.get("/static/{path:path}", name="ui_static")
@@ -620,7 +618,6 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
 
 def _compute_return(req: ReturnInput):
     from app.api import http as api_http
-
     return api_http._compute_for_year(req)
 
 
