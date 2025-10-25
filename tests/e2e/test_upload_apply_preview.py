@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import os
+import shutil
 import socket
 import threading
 import time
@@ -15,9 +17,10 @@ from playwright.sync_api import expect
 
 import app.wizard as wizard
 from app.config import get_settings
-import app.ui.router as ui_router_module
 from app.ui import slip_ingest
 from app.wizard import profiles
+
+ui_router_module = importlib.import_module("app.ui.router")
 
 
 TEST_T183_KEY = "jLNo6J1iO5Y5P2bIC2T5T8DKS-p91Z9a7qV3-0iKqa4="
@@ -32,6 +35,16 @@ def _reserve_port(host: str = "127.0.0.1") -> int:
 @pytest.fixture(scope="session")
 def sample_t4_slip_path() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "sample_t4_slip.txt"
+
+
+@pytest.fixture()
+def duplicate_t4_slip_path(
+    tmp_path_factory: pytest.TempPathFactory, sample_t4_slip_path: Path
+) -> Path:
+    duplicate_dir = tmp_path_factory.mktemp("duplicate-slip")
+    duplicate_path = duplicate_dir / "sample_t4_duplicate.txt"
+    shutil.copyfile(sample_t4_slip_path, duplicate_path)
+    return duplicate_path
 
 
 @pytest.fixture(scope="session")
@@ -140,7 +153,12 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 @pytest.mark.smoke
 @pytest.mark.playwright_smoke
-def test_upload_apply_preview_flow(page, ui_server_url: str, sample_t4_slip_path: Path) -> None:
+def test_upload_apply_preview_flow(
+    page,
+    ui_server_url: str,
+    sample_t4_slip_path: Path,
+    duplicate_t4_slip_path: Path,
+) -> None:
     page.goto(f"{ui_server_url}/ui/returns/new?step=slips")
 
     dropzone = page.locator("#t4-slip-dropzone")
@@ -152,17 +170,19 @@ def test_upload_apply_preview_flow(page, ui_server_url: str, sample_t4_slip_path
 
     page.set_input_files("#t4-slip-file-input", str(sample_t4_slip_path))
 
-    queue_item = page.locator("#t4-file-queue li").first
-    expect(queue_item).to_be_visible()
+    queue_items = page.locator("#t4-file-queue li")
+    first_item = queue_items.first
+    first_status = first_item.locator(".file-status")
+
+    expect(first_item).to_be_visible()
     expect(apply_button).to_be_disabled()
 
-    status = queue_item.locator(".file-status")
-    expect(status).to_have_text("Ready to apply", timeout=5000)
+    expect(first_status).to_have_text("Ready to apply", timeout=5000)
     expect(apply_button).not_to_be_disabled()
 
     apply_button.click()
 
-    expect(status).to_have_text("Applied to form", timeout=5000)
+    expect(first_status).to_have_text("Applied to form", timeout=5000)
 
     expect(page.locator("input[name='slips_t4-0-employment_income']")).to_have_value("55123.45")
     expect(page.locator("input[name='slips_t4-0-tax_deducted']")).to_have_value("8765.43")
@@ -171,6 +191,15 @@ def test_upload_apply_preview_flow(page, ui_server_url: str, sample_t4_slip_path
 
     expect(apply_button).to_be_disabled()
 
-    queue_item.locator(".file-remove").click()
+    page.set_input_files("#t4-slip-file-input", str(duplicate_t4_slip_path))
+
+    expect(queue_items).to_have_count(2)
+    expect(apply_button).to_be_disabled()
+
+    first_item.locator(".file-remove").click()
+    expect(queue_items).to_have_count(1)
+    expect(queue_items.first.locator(".file-remove")).to_be_focused()
+
+    queue_items.first.locator(".file-remove").click()
     expect(queue).to_have_attribute("data-empty", "true")
     expect(dropzone).to_be_focused()
