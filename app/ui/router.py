@@ -40,6 +40,8 @@ from app.wizard import (
 )
 
 router = APIRouter(prefix="/ui", tags=["ui"])
+BASE_DIR = Path(__file__).resolve().parent
+router.BASE_DIR = BASE_DIR
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
