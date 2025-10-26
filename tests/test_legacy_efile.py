@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -10,8 +11,8 @@ from app.config import Settings
 from tests.fixtures.min_client import make_min_input
 
 
-def _settings_for_test(tmp_path: Path, **overrides) -> Settings:
-    base_kwargs = {
+def _settings_for_test(tmp_path: Path, **overrides: Any) -> Settings:
+    base_kwargs: dict[str, Any] = {
         "artifact_root": str(tmp_path / "artifacts"),
         "daily_summary_root": str(tmp_path / "summaries"),
         "endpoint_cert": "http://127.0.0.1:9000",

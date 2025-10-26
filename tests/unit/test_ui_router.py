@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 import json
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -45,6 +46,10 @@ def _build_client():
     app = FastAPI()
     app.include_router(ui_router_module.router)
     return TestClient(app)
+
+
+def _client_app(client: TestClient) -> FastAPI:
+    return cast(FastAPI, client.app)
 
 
 def _seed_return_draft(slug: str, tax_year: int = 2025) -> None:
@@ -207,7 +212,7 @@ def test_t183_consent_page_includes_masked_sin(tmp_path, monkeypatch):
     _seed_return_draft("tester")
 
     client = _build_client()
-    client.app.state.artifact_root = tmp_path / "artifacts"
+    _client_app(client).state.artifact_root = tmp_path / "artifacts"
 
     response = client.get("/ui/profiles/tester/t183")
 
@@ -225,7 +230,7 @@ def test_t183_consent_submission_stores_record(tmp_path, monkeypatch):
 
     client = _build_client()
     artifact_root = tmp_path / "artifacts"
-    client.app.state.artifact_root = artifact_root
+    _client_app(client).state.artifact_root = artifact_root
 
     response = client.post(
         "/ui/profiles/tester/t183",
@@ -269,7 +274,7 @@ def test_profile_page_lists_t183_records(tmp_path, monkeypatch):
 
     client = _build_client()
     artifact_root = tmp_path / "artifacts"
-    client.app.state.artifact_root = artifact_root
+    _client_app(client).state.artifact_root = artifact_root
 
     # Seed a stored record
     client.post(

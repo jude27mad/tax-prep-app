@@ -53,6 +53,7 @@ def test_store_signed_and_purge(tmp_path, monkeypatch):
     assert payload["taxpayer_sin_masked"] == "***-***-6789"
     assert payload["retention_years"] == t183.RETENTION_YEARS
     assert payload["filed_at"] == record.filed_at.isoformat()
+    assert record.esign_accepted_at is not None
     assert payload["esign_accepted_at"] == record.esign_accepted_at.isoformat()
 
     purge_time = record.expires_at + timedelta(days=1)

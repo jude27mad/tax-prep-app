@@ -15,6 +15,13 @@ def _schema_cache():
     return {p.name: p.read_text() for p in Path("app/schemas").glob("*.xsd")}
 
 
+def _require_text(element: ET.Element, xpath: str) -> str:
+    value = element.findtext(xpath)
+    if value is None:
+        raise AssertionError(f"Missing expected element {xpath}")
+    return value
+
+
 def test_t619_matches_golden():
     req = make_min_input(include_examples=True)
     calc = compute_return(req)
@@ -33,10 +40,10 @@ def test_t619_matches_golden():
     assert package.t183_xml == (golden_dir / "t183_authorization.xml").read_text(encoding="utf-8")
     t183_root = ET.fromstring(package.t183_xml)
     signed_at = datetime.fromisoformat(
-        t183_root.findtext(f"{{{NS_T183}}}Signature/{{{NS_T183}}}SignedAt")
+        _require_text(t183_root, f"{{{NS_T183}}}Signature/{{{NS_T183}}}SignedAt")
     )
     expires_at = datetime.fromisoformat(
-        t183_root.findtext(f"{{{NS_T183}}}Signature/{{{NS_T183}}}ExpiresAt")
+        _require_text(t183_root, f"{{{NS_T183}}}Signature/{{{NS_T183}}}ExpiresAt")
     )
     assert expires_at == _compute_expiry(signed_at)
     payload_documents = _decode_payload(package.envelope_xml)

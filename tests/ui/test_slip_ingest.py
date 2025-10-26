@@ -1,7 +1,7 @@
 import io
 
 import pytest
-from starlette.datastructures import UploadFile
+from fastapi import UploadFile
 
 from app.ui.slip_ingest import ingest_slip_uploads
 

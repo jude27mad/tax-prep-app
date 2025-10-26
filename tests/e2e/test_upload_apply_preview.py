@@ -2,22 +2,53 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+import importlib
 import os
 import socket
 import threading
 import time
 from pathlib import Path
+from typing import Any, Protocol, cast
 
 import pytest
 import uvicorn
 from fastapi import FastAPI
-from playwright.sync_api import expect
 
 import app.wizard as wizard
 from app.config import get_settings
 import app.ui.router as ui_router_module
 from app.ui import slip_ingest
 from app.wizard import profiles
+
+
+class _LocatorAssertions(Protocol):
+    def to_be_disabled(self, *args: Any, **kwargs: Any) -> None: ...
+    def not_to_be_disabled(self, *args: Any, **kwargs: Any) -> None: ...
+    def to_have_attribute(self, *args: Any, **kwargs: Any) -> None: ...
+    def to_have_value(self, *args: Any, **kwargs: Any) -> None: ...
+    def to_have_text(self, *args: Any, **kwargs: Any) -> None: ...
+    def to_be_visible(self, *args: Any, **kwargs: Any) -> None: ...
+    def to_be_focused(self, *args: Any, **kwargs: Any) -> None: ...
+
+
+class _ExpectCallable(Protocol):
+    def __call__(self, *args: Any, **kwargs: Any) -> _LocatorAssertions: ...
+
+
+try:
+    _playwright_sync_api = importlib.import_module("playwright.sync_api")
+except ModuleNotFoundError:  # pragma: no cover - exercised only when Playwright missing locally
+    class _MissingExpect:
+        def __call__(self, *args: Any, **kwargs: Any) -> _LocatorAssertions:  # type: ignore[override]
+            raise RuntimeError(
+                "playwright.sync_api.expect is required for the upload/apply/preview E2E test. "
+                "Install Playwright to run this test suite."
+            )
+
+    expect = cast(_ExpectCallable, _MissingExpect())
+else:
+    expect = cast(_ExpectCallable, getattr(_playwright_sync_api, "expect"))
 
 
 TEST_T183_KEY = "jLNo6J1iO5Y5P2bIC2T5T8DKS-p91Z9a7qV3-0iKqa4="
@@ -35,7 +66,7 @@ def sample_t4_slip_path() -> Path:
 
 
 @pytest.fixture(scope="session")
-def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> str:
+def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     base_dir = tmp_path_factory.mktemp("ui-playwright")
     artifact_root = base_dir / "artifacts"
     summary_root = artifact_root / "summaries"
