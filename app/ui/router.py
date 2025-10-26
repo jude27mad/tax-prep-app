@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, Response, Up
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ValidationError, field_validator
-from starlette.datastructures import UploadFile as StarletteUploadFile  # for type-narrowing form inputs
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config import Settings, get_settings
 from app.core.models import ReturnInput
@@ -40,13 +40,17 @@ from app.wizard import (
 )
 
 router = APIRouter(prefix="/ui", tags=["ui"])
-BASE_DIR = Path(__file__).resolve().parent
-router.BASE_DIR = BASE_DIR
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
 STATIC_ROOT = UI_ROOT / "static"
 PROFILE_DRAFTS_ROOT = BASE_DIR / "profiles"
+
+# Attach test-hook attributes directly on the router object
+r = cast(Any, router)
+r.BASE_DIR = BASE_DIR
+r.PROFILE_DRAFTS_ROOT = PROFILE_DRAFTS_ROOT
+r.router = router  # <-- needed so tests can call ui_router_module.router
 
 FORM_STEPS: list[dict[str, str]] = [
     {"slug": "identity", "label": "Identity"},
@@ -679,7 +683,7 @@ def _collect_t183_records(request: Request, slug: str) -> tuple[list[dict[str, A
         for meta_path in sorted(target_dir.glob("t183_*.json"), reverse=True):
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):  # pragma: no cover - corrupt metadata skipped
+            except (OSError, json.JSONDecodeError):
                 continue
             profile_ref = meta.get("profile")
             if profile_ref and profile_ref != slug:
@@ -710,7 +714,7 @@ def _collect_t183_records(request: Request, slug: str) -> tuple[list[dict[str, A
                 record["download_url"] = request.url_for(
                     "ui_t183_download", slug=slug, record_id=record_id
                 )
-            except Exception:  # pragma: no cover - url_for may fail if router not mounted
+            except Exception:
                 record["download_url"] = None
             records.append(record)
     records.sort(key=lambda entry: entry.get("signed_at") or "", reverse=True)
@@ -736,7 +740,6 @@ def _t183_consent_context(
     sin = str(taxpayer_state.get("sin", "") or "").strip()
     tax_year = state.get("tax_year") if isinstance(state, dict) else ""
 
-    # Safely coerce tax_year to text for display
     try:
         tax_year_text = str(int(cast(int | str, tax_year)))
     except (TypeError, ValueError):
@@ -900,7 +903,7 @@ async def _persist_t183_consent(
     target_dir = retention_root / f"{tax_year}" / last_four
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = int(datetime.now(timezone.utc).timestamp())
-    # Ensure unique filenames
+    # ensure unique names even if loop runs fast
     while True:
         base_name = f"t183_{timestamp}"
         summary_path = target_dir / f"{base_name}.txt"
