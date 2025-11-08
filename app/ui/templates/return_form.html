@@ -435,9 +435,9 @@
                   aria-label="Queued slip files"
                 ></ul>
               </div>
-              <div class="queue-actions">
-                <button type="button" id="apply-detections" class="btn" disabled>Apply detections</button>
-              </div>
+              <fieldset id="apply-detections-gate" class="queue-actions" disabled>
+                <button type="button" id="apply-detections" class="btn" disabled aria-disabled="true">Apply detections</button>
+              </fieldset>
             </div>
             <div id="t4-slips">
               {% for slip in form_state.slips_t4 %}
@@ -1373,3 +1373,14 @@
   </script>
   <script type="module" src="{{ url_for('ui_static', path='js/return_form.js') }}"></script>
 {% endblock %}
+
+
+
+
+
+
+
+
+
+
+

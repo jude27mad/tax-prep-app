@@ -5,6 +5,16 @@ const dropzone = document.getElementById("t4-slip-dropzone");
 const fileInput = document.getElementById("t4-slip-file-input");
 const queueList = document.getElementById("t4-file-queue");
 const applyButton = document.getElementById("apply-detections");
+const applyButtonGate = document.getElementById("apply-detections-gate");
+const requestFrame =
+  typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+    ? window.requestAnimationFrame.bind(window)
+    : null;
+const cancelFrame =
+  typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function"
+    ? window.cancelAnimationFrame.bind(window)
+    : null;
+let pendingApplyEnableFrameId = null;
 
 const formRoot = document.getElementById("return-form");
 const stepper = formRoot?.querySelector("[data-stepper]") ?? null;
@@ -497,11 +507,36 @@ async function stageFile(entry) {
   }
 }
 
+function setApplyElementsEnabled(enabled) {
+  if (applyButtonGate) {
+    applyButtonGate.disabled = !enabled;
+  }
+  if (applyButton) {
+    applyButton.disabled = !enabled;
+    const shouldBeAriaDisabled = !enabled || (applyButtonGate?.disabled ?? false);
+    applyButton.setAttribute("aria-disabled", String(shouldBeAriaDisabled));
+  }
+}
+
 function updateApplyState() {
-  if (!applyButton) return;
+  if (pendingApplyEnableFrameId !== null && cancelFrame) {
+    cancelFrame(pendingApplyEnableFrameId);
+    pendingApplyEnableFrameId = null;
+  }
   const hasDetections = detectionStore.size > 0;
-  applyButton.disabled = !hasDetections;
-  applyButton.setAttribute("aria-disabled", String(!hasDetections));
+  if (!hasDetections) {
+    setApplyElementsEnabled(false);
+    return;
+  }
+  if (requestFrame) {
+    pendingApplyEnableFrameId = requestFrame(() => {
+      pendingApplyEnableFrameId = null;
+      const stillHasDetections = detectionStore.size > 0;
+      setApplyElementsEnabled(stillHasDetections);
+    });
+    return;
+  }
+  setApplyElementsEnabled(true);
 }
 
 function restoreQueueFromPersistence() {

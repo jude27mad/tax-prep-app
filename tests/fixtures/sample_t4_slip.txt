@@ -1,0 +1,7 @@
+T4 Statement of Remuneration Paid
+Box 14 Employment income: $55,123.45
+Box 22 Income tax deducted 8,765.43
+CPP contributions (Box 16) 3,000.99
+EI premiums Box 18 890.12
+Box 26 Pensionable earnings 55123.45
+Box 24 Insurable earnings 55123.45

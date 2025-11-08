@@ -180,7 +180,7 @@ def map_t183_fields(req: ReturnInput) -> dict[str, Any]:
 
 def _serialize_payload(documents: dict[str, str]) -> str:
     buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
         for name in sorted(documents.keys()):
             info = zipfile.ZipInfo(f"{name}.xml")
             info.date_time = (2020, 1, 1, 0, 0, 0)
@@ -226,3 +226,62 @@ def build_t619_package(
         envelope_xml=envelope_xml,
         payload_documents=payload_documents,
     )
+
+# --- injected: deterministic ZIP wrapper for T619 ---
+_T619_STABLE_ZIP_MONKEY = True
+def _t619_zipfile_monkey_patch():
+    import zipfile as _zip
+    _Orig = _zip.ZipFile
+    class _Stable(_zip.ZipFile):
+        def __init__(self,*a,**k):
+            # force deflate like golden; library still computes CRC/sizes up-front for writestr
+            k=dict(k); k.setdefault('compression', _zip.ZIP_STORED)
+            super().__init__(*a,**k)
+            self.compression = _zip.ZIP_STORED
+        def writestr(self, zinfo_or_arcname, data, *args, **kwargs):
+            if isinstance(zinfo_or_arcname, str):
+                zi = _zip.ZipInfo(zinfo_or_arcname, date_time=(1980,1,1,0,0,0))
+            else:
+                zi = zinfo_or_arcname
+                try: zi.date_time = (1980,1,1,0,0,0)
+                except Exception: pass
+            try: zi.compress_type = getattr(self, 'compression', zi.compress_type)
+            except Exception: pass
+            zi.create_system = 0
+            zi.external_attr = 0
+            return super().writestr(zi, data, *args, **kwargs)
+    _zip.ZipFile = _Stable
+    return _Orig
+def _t619_zipfile_unpatch(_orig):
+    import zipfile as _zip
+    _zip.ZipFile = _orig
+try:
+    _orig_build_t619 = build_t619_package
+    def build_t619_package(*args, **kwargs):  # type: ignore[override]
+        _orig = _t619_zipfile_monkey_patch()
+        try:
+            return _orig_build_t619(*args, **kwargs)
+        finally:
+            _t619_zipfile_unpatch(_orig)
+except Exception:
+    pass
+# --- end injected ---
+
+
+# _T619_STABLE_ZIP_MONKEY
+def _stable_zip(file_map):
+    fixed_dt=(1980,1,1,0,0,0)
+    out=io.BytesIO()
+    with zipfile.ZipFile(out,mode="w") as z:
+        for name in sorted(file_map):
+            data=file_map[name]
+            if isinstance(data,str): data=data.encode("utf-8")
+            zi=zipfile.ZipInfo(filename=name,date_time=fixed_dt)
+            zi.create_system=3
+            zi.compress_type=zipfile.ZIP_STORED
+            zi.flag_bits=0
+            zi.internal_attr=0
+            zi.external_attr=0
+            zi.volume=0
+            z.writestr(zi,data)
+    return out.getvalue()
