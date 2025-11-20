@@ -6,6 +6,7 @@ const fileInput = document.getElementById("t4-slip-file-input");
 const queueList = document.getElementById("t4-file-queue");
 const applyButton = document.getElementById("apply-detections");
 const applyButtonGate = document.getElementById("apply-detections-gate");
+const APPLY_ENABLE_DELAY_MS = 150;
 const requestFrame =
   typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
     ? window.requestAnimationFrame.bind(window)
@@ -15,6 +16,7 @@ const cancelFrame =
     ? window.cancelAnimationFrame.bind(window)
     : null;
 let pendingApplyEnableFrameId = null;
+let pendingApplyEnableTimeoutId = null;
 
 const formRoot = document.getElementById("return-form");
 const stepper = formRoot?.querySelector("[data-stepper]") ?? null;
@@ -523,6 +525,10 @@ function updateApplyState() {
     cancelFrame(pendingApplyEnableFrameId);
     pendingApplyEnableFrameId = null;
   }
+  if (pendingApplyEnableTimeoutId !== null) {
+    clearTimeout(pendingApplyEnableTimeoutId);
+    pendingApplyEnableTimeoutId = null;
+  }
   const hasDetections = detectionStore.size > 0;
   if (!hasDetections) {
     setApplyElementsEnabled(false);
@@ -531,12 +537,18 @@ function updateApplyState() {
   if (requestFrame) {
     pendingApplyEnableFrameId = requestFrame(() => {
       pendingApplyEnableFrameId = null;
-      const stillHasDetections = detectionStore.size > 0;
-      setApplyElementsEnabled(stillHasDetections);
+      pendingApplyEnableTimeoutId = window.setTimeout(() => {
+        pendingApplyEnableTimeoutId = null;
+        const stillHasDetections = detectionStore.size > 0;
+        setApplyElementsEnabled(stillHasDetections);
+      }, APPLY_ENABLE_DELAY_MS);
     });
     return;
   }
-  setApplyElementsEnabled(true);
+  pendingApplyEnableTimeoutId = window.setTimeout(() => {
+    pendingApplyEnableTimeoutId = null;
+    setApplyElementsEnabled(true);
+  }, APPLY_ENABLE_DELAY_MS);
 }
 
 function restoreQueueFromPersistence() {
