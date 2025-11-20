@@ -1,5 +1,13 @@
 """Playwright smoke coverage for the upload → apply → preview UI workflow."""
 
+import sys
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32" and sys.version_info >= (3, 13),
+    reason="Playwright not supported on this Python/Windows combo",
+)
+
 from __future__ import annotations
 
 from collections.abc import Iterator
