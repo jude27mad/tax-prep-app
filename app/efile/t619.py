@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
-from os import PathLike
-from typing import Any, Dict, IO, Literal
+from typing import Any, Dict
 import zipfile
 from xml.dom import minidom
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -25,6 +24,9 @@ SCHEMA_T183 = "cra_t183_authorization_v1.xsd"
 SCHEMA_T619 = "cra_t619_envelope_v1.xsd"
 
 _COMPILED_SCHEMAS: Dict[str, xmlschema.XMLSchemaBase] = {}
+
+_ZIP_FIXED_DATETIME = (2020, 1, 1, 0, 0, 0)
+_ZIP_EXTERNAL_ATTR = 0o600 << 16
 
 
 @dataclass
@@ -101,7 +103,11 @@ def _build_t619_element(profile: dict[str, str], payload_b64: str, sbmt_ref_id: 
 def _format_decimal(value: Decimal | None) -> str:
     if value is None:
         return "0.00"
-    quantized = value.quantize(Decimal("0.01")) if isinstance(value, Decimal) else Decimal(value).quantize(Decimal("0.01"))
+    quantized = (
+        value.quantize(Decimal("0.01"))
+        if isinstance(value, Decimal)
+        else Decimal(value).quantize(Decimal("0.01"))
+    )
     return format(quantized, "f")
 
 
@@ -179,16 +185,23 @@ def map_t183_fields(req: ReturnInput) -> dict[str, Any]:
     return data
 
 
-def _serialize_payload(documents: dict[str, str], zip_cls: type[zipfile.ZipFile]) -> str:
+def _serialize_payload(documents: dict[str, str]) -> str:
     buffer = BytesIO()
-    with zip_cls(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
         for name in sorted(documents.keys()):
-            archive.writestr(f"{name}.xml", documents[name].encode("utf-8"))
+            info = zipfile.ZipInfo(f"{name}.xml", date_time=_ZIP_FIXED_DATETIME)
+            info.create_system = 3
+            info.external_attr = _ZIP_EXTERNAL_ATTR
+            info.compress_type = zipfile.ZIP_STORED
+            info.flag_bits = 0
+            info.internal_attr = 0
+            info.volume = 0
+            archive.writestr(info, documents[name].encode("utf-8"))
     zipped_bytes = buffer.getvalue()
     return base64.b64encode(zipped_bytes).decode("ascii")
 
 
-def _build_t619_package(
+def build_t619_package(
     req: ReturnInput,
     calc: ReturnCalc,
     profile: dict[str, str],
@@ -211,8 +224,7 @@ def _build_t619_package(
         "T1Return": t1_xml,
         "T183Authorization": t183_xml,
     }
-    zip_cls = _zip_file_class()
-    payload_blob = _serialize_payload(payload_documents, zip_cls)
+    payload_blob = _serialize_payload(payload_documents)
 
     envelope_element = _build_t619_element(profile, payload_blob, sbmt_ref_id)
     envelope_xml = _prettify(envelope_element)
@@ -226,72 +238,20 @@ def _build_t619_package(
         payload_documents=payload_documents,
     )
 
-_USE_STABLE_T619_ZIP = True
-_ZIP_FIXED_DATETIME = (2020, 1, 1, 0, 0, 0)
-_ZIP_EXTERNAL_ATTR = 0o600 << 16
-_ZipMode = Literal["r", "w", "x", "a"]
-
-
-class PatchedZipFile(zipfile.ZipFile):
-    """ZipFile variant that enforces deterministic metadata."""
-
-    def __init__(
-        self,
-        file: str | PathLike[str] | IO[bytes],
-        mode: _ZipMode = "r",
-        compression: int = zipfile.ZIP_STORED,
-        allowZip64: bool = True,
-        compresslevel: int | None = None,
-        strict_timestamps: bool = True,
-    ) -> None:
-        super().__init__(
-            file=file,
-            mode=mode,
-            compression=compression,
-            allowZip64=allowZip64,
-            compresslevel=compresslevel,
-            strict_timestamps=strict_timestamps,
-        )
-        self.compression = compression
-
-    def writestr(self, zinfo_or_arcname: zipfile.ZipInfo | str, data: bytes | str, *args: Any, **kwargs: Any) -> None:
-        if isinstance(zinfo_or_arcname, str):
-            zip_info = zipfile.ZipInfo(zinfo_or_arcname, date_time=_ZIP_FIXED_DATETIME)
-        else:
-            zip_info = zinfo_or_arcname
-            zip_info.date_time = _ZIP_FIXED_DATETIME
-
-        zip_info.compress_type = getattr(self, "compression", zip_info.compress_type)
-        zip_info.create_system = 3
-        zip_info.external_attr = _ZIP_EXTERNAL_ATTR
-        zip_info.flag_bits = 0
-        zip_info.internal_attr = 0
-        zip_info.volume = 0
-        super().writestr(zip_info, data, *args, **kwargs)
-
-
-def _zip_file_class() -> type[zipfile.ZipFile]:
-    if _USE_STABLE_T619_ZIP:
-        return PatchedZipFile
-    return zipfile.ZipFile
-
-
-def build_t619_package(
-    req: ReturnInput,
-    calc: ReturnCalc,
-    profile: dict[str, str],
-    schema_cache: dict[str, str],
-    sbmt_ref_id: str,
-) -> T619Package:
-    return _build_t619_package(req, calc, profile, schema_cache, sbmt_ref_id)
-
 
 def _stable_zip(file_map: dict[str, bytes | str]) -> bytes:
     buffer = BytesIO()
-    with PatchedZipFile(buffer, mode="w") as archive:
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
         for name in sorted(file_map):
             data = file_map[name]
             if isinstance(data, str):
                 data = data.encode("utf-8")
-            archive.writestr(name, data)
+            info = zipfile.ZipInfo(name, date_time=_ZIP_FIXED_DATETIME)
+            info.create_system = 3
+            info.external_attr = _ZIP_EXTERNAL_ATTR
+            info.compress_type = zipfile.ZIP_STORED
+            info.flag_bits = 0
+            info.internal_attr = 0
+            info.volume = 0
+            archive.writestr(info, data)
     return buffer.getvalue()
