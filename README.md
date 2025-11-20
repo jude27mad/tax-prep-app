@@ -1,31 +1,70 @@
 # Tax App
 
-Comprehensive CRA-focused toolkit comprising:
+CRA-focused toolkit for estimating personal income tax, preparing full T1
+returns, and assembling/validating EFILE XML (T619/T1/T183).
 
-- **Estimator API** (`app/main.py`): quick personal tax estimates for annual slips
-  and payroll checks.
-- **Preparer API** (`app/api/http.py`): end-to-end T1 workflow including
-  validation, XML assembly (T619/T1/T183), EFILE transmission helpers,
-  printouts, and certification tooling.
-- **Support packages**: reusable calculators, schema cache, artifact retention,
-  and ingestion scripts.
+---
 
-## Project layout
+## Repo map 🗺️
+
 
 ```text
-|-- app/
-|   |-- api/            # Preparer FastAPI application
-|   |-- core/           # Domain models, calculators, validators
-|   |-- efile/          # XML builders, transmission client, retention logic
-|   |-- main.py         # Estimator FastAPI application
-|   |-- lifespan.py     # Shared startup/shutdown manager
-|   `-- schemas/        # CRA XSD cache (T619, T1, T183, etc.)
-|-- docs/               # Operational guidance (e.g., CRA suitability checklist)
-|-- scripts/            # Replay, reject scan, coverage gate, IFT mock, purge jobs
-|-- tests/              # Unit, e2e, golden XML, fuzz suites
-`-- requirements.txt
-
+repo-root/
+├─ .github/workflows/        CI: Ruff, mypy, pytest, Playwright
+├─ .hypothesis/constants/    Hypothesis/fuzzing configs
+├─ PyPDF2/                   Local PDF helpers / patches
+├─ app/                      Main application code
+│  ├─ api/                   Preparer FastAPI (T1/T619/T183 HTTP API)
+│  ├─ core/                  Domain models, calculators, validators
+│  ├─ efile/                 XML builders, transmission client, retention logic
+│  ├─ main.py                Estimator FastAPI application
+│  ├─ lifespan.py            Shared startup/shutdown manager
+│  └─ schemas/               CRA XSD cache (T619, T1, T183, etc.)
+├─ docs/                     Operational docs (e.g. CRA suitability checklist)
+├─ inbox/                    Sample inputs / wizard data
+├─ scripts/                  Replay, reject scan, coverage gate, IFT mock, purge
+├─ tests/                    Unit, e2e, golden XML, fuzz suites
+├─ typings/                  Typing fixes / optional stubs
+├─ .env.example              Example env configuration
+├─ .gitignore
+├─ CHANGELOG.md
+├─ License                   Proprietary license (no use without permission)
+├─ README.md                 ← 📍 you are here
+├─ mypy.ini                  Static typing configuration
+├─ pyrightconfig.json        Pyright configuration
+├─ pytest.ini                Pytest configuration
+├─ requirements.txt          Python dependencies
+├─ user_data.example.toml    Sample estimator input
+└─ user_data.toml            Default estimator input
 ```
+
+Use this map as the mental “directory sign” at the repo entrance.
+
+---
+
+## Components
+
+* **Estimator API** (`app/main.py`): quick personal tax estimates for annual
+  slips and payroll checks.
+* **Preparer API** (`app/api/http.py`): end-to-end T1 workflow including
+  validation, XML assembly (T619/T1/T183), EFILE transmission helpers,
+  printouts, and certification tooling.
+* **Support packages**: reusable calculators, schema cache, artifact retention,
+  and ingestion scripts.
+
+### `app/` layout
+
+```text
+app/
+├─ api/            Preparer FastAPI application
+├─ core/           Domain models, calculators, validators
+├─ efile/          XML builders, transmission client, retention logic
+├─ main.py         Estimator FastAPI application
+├─ lifespan.py     Shared startup/shutdown manager
+└─ schemas/        CRA XSD cache (T619, T1, T183, etc.)
+```
+
+---
 
 ## Quick start (single terminal)
 
@@ -41,31 +80,35 @@ pip install -r requirements.txt
 > included in `requirements.txt`. Ensure your environment picks up the updated
 > dependency when reinstalling requirements.
 
+---
+
 ## Native OCR and browser prerequisites
 
 OCR features depend on native binaries in addition to the Python packages listed
 in `requirements.txt`.
 
-- **Tesseract OCR** – install the CLI binary that matches your platform
-  (Mac: `brew install tesseract`, Ubuntu/Debian: `sudo apt-get install -y tesseract-ocr`,
-  Windows: download the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki)).
-- **Poppler utilities** – required by `pdf2image` for PDF rasterization
-  (Mac: `brew install poppler`, Ubuntu/Debian: `sudo apt-get install -y poppler-utils`,
-  Windows: install the [prebuilt binaries](https://blog.alivate.com.au/poppler-windows/)
-  and add `bin/` to `PATH`).
+* **Tesseract OCR** – install the CLI binary that matches your platform.
+* **Poppler utilities** – required by `pdf2image` for PDF rasterization.
 
 CI runners and developer workstations should install these prerequisites before
 running the OCR flows so that `pytesseract` and `pdf2image` can invoke the
-underlying binaries. For Playwright smoke tests, run `playwright install` after
-`pip install -r requirements.txt` to download the supported browsers.
+underlying binaries. For Playwright smoke tests, run:
+
+```bash
+playwright install
+```
+
+after `pip install -r requirements.txt` to download the supported browsers.
+
+---
 
 ## Guided wizard (no JSON typing)
 
-The estimator now includes a prompt-driven CLI so you can answer questions
-without worrying about Python syntax or JSON formatting.
+The estimator includes a prompt-driven CLI so you can answer questions without
+worrying about Python syntax or JSON formatting.
 
 ```bash
-python -m app.main           # start the wizard (auto-saves answers)
+python -m app.main
 python -m app.main help box14
 python -m app.main checklist
 ```
@@ -76,32 +119,35 @@ root-level `user_data.*`, then `inbox/*.toml|json|txt|csv`. Files like
 
 Wizard tips:
 
-- Use `--profile NAME` to load or create a personal profile. Each profile lives
-  under `profiles/<slug>.toml` with automatic history snapshots and a trash bin
-  for restores. Manage them with `python -m app.main profiles
-  list|show|switch|rename|delete|restore`.
-- Combine `--data PATH` with profiles to preload answers from files; add
-  `--quick` to revisit only the required prompts when everything else is filled
-  in already.
-- Control colors with `--color {auto,always,never}` (or `--no-color`). If Rich
-  is installed the wizard renders tables; otherwise it falls back to plain
-  text.
-- Type `?` at any prompt for contextual help or run `python -m app.main help
-  topics` for the full guide list (T4/T4A/T5 slips, tuition credit, Canada
-  Workers Benefit, RRSP advice).
-- Run `python -m app.main checklist` to generate the document checklist
-  tailored to your answers.
-- After the review screen you get a diff of all changes. Profiles save
-  automatically unless you pass `--no-save`; without a profile the wizard
-  still updates `user_data.toml` for backwards compatibility.
+* `--profile NAME` for personal profiles under `profiles/<slug>.toml`
+  (history snapshots + trash bin).
+* Combine `--data PATH` with profiles; add `--quick` to revisit only required
+  prompts.
+* `--color {auto,always,never}` (or `--no-color`) to control colors.
+* `?` at any prompt for contextual help; `help topics` for full guide list.
+* `checklist` to generate a tailored document checklist.
+* After review you get a diff of all changes; profiles save automatically unless
+  `--no-save` is provided.
 
 `user_data.toml` remains available for quick runs or CI. Copy
 `user_data.example.toml` or drop files into `inbox/` (see `inbox/README.txt`)
 when you are not using profiles.
 
+---
+
 ## Provincial coverage
 
-The estimator currently supports 2025 provincial tax for Ontario, British Columbia, Alberta, Manitoba, Saskatchewan, Nova Scotia, New Brunswick, Newfoundland and Labrador, Prince Edward Island, Yukon, Northwest Territories, and Nunavut (Québec handled separately). The wizard and API accept two-letter province codes (`province=ON`, `BC`, `AB`, `MB`); more provinces will be added in upcoming phases.
+The estimator currently supports 2025 provincial tax for:
+
+* Ontario, British Columbia, Alberta, Manitoba, Saskatchewan,
+  Nova Scotia, New Brunswick, Newfoundland and Labrador,
+  Prince Edward Island, Yukon, Northwest Territories, Nunavut
+  (Québec handled separately).
+
+The wizard and API accept two-letter province codes (`ON`, `BC`, `AB`, `MB`);
+Ontario remains the default when omitted.
+
+---
 
 ## Running the APIs
 
@@ -113,7 +159,7 @@ Open separate terminals for each API (activate `.venv` in both).
 uvicorn app.main:app --reload --port 8000
 ```
 
-Docs: <http://127.0.0.1:8000/docs>
+Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ### Preparer (port 8001)
 
@@ -121,46 +167,40 @@ Docs: <http://127.0.0.1:8000/docs>
 uvicorn app.api.http:app --reload --port 8001
 ```
 
-Docs: <http://127.0.0.1:8001/docs>
+Docs: [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs)
 
 Stop any server with `Ctrl+C`.
 
-### API schema updates (2025 enhancements)
+---
 
-- **Request slip summaries**: `/prepare` and `/prepare/efile` now accept optional
-  `slips_t4_count`, `slips_t4a_count`, and `slips_t5_count` fields when sending
-  JSON payloads. When provided, the counts are validated against the attached
-  slips and CRA's 50-slip per-type maximum to surface mismatches before filing.
-- **RRSP aggregation**: RRSP contributions can be supplied as a direct
-  `rrsp_contrib` amount and/or a list of `rrsp_receipts` with individual
-  contribution records. The calculator consolidates both sources before applying
-  deductions, and validation now enforces non-negative amounts on every receipt.
-- **Expanded provincial inputs**: `ReturnInput.province` accepts the 2025 codes
-  registered in the dispatch layer (`ON`, `BC`, `AB`, `MB`, `SK`, `NS`, `NB`,
-  `NL`, `PE`, `YT`, `NT`, `NU`). Ontario remains the default when omitted, but
-  providing the code ensures the correct calculator and additions are applied.
-- **Response line items**: The `calc.line_items` payload returned from
-  `/prepare` and `/prepare/efile` now reflects combined T4/T4A/T5 incomes and
-  RRSP deductions, and includes province-specific addition keys (e.g.
-  `ontario_surtax`, `ontario_health_premium`) when the calculator reports them.
+## API schema updates (2025 enhancements)
+
+* Optional slip count fields with validation:
+  `slips_t4_count`, `slips_t4a_count`, `slips_t5_count`.
+* RRSP aggregation via `rrsp_contrib` and `rrsp_receipts` list.
+* Expanded `ReturnInput.province` support for the 2025 codes.
+* `calc.line_items` now reflects combined incomes, RRSP deductions, and
+  province-specific additions.
+
+---
 
 ## Environment configuration
 
 Key environment variables (defaults shown):
 
-| Variable | Purpose | Default |
-| --- | --- | --- |
-| `FEATURE_EFILE_XML` | Enable XML transmission flow | `false` |
-| `FEATURE_LEGACY_EFILE` | Enable legacy EFILE flow | `false` |
-| `EFILE_ENV` | Environment selector (`CERT`/`PROD`) | `CERT` |
-| `EFILE_SOFTWARE_ID_CERT` / `EFILE_SOFTWARE_ID_PROD` | CRA Software IDs | `TAXAPP-CERT`, `TAXAPP-PROD` |
-| `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs | `900000`, `900001` |
-| `EFILE_ENDPOINT_CERT` / `EFILE_ENDPOINT_PROD` | CRA endpoints | `http://127.0.0.1:9000`, `https://prod-placeholder` |
-| `SOFTWARE_VERSION` | Application version string | `0.0.3` |
-| `T183_CRYPTO_KEY` | Fernet key for encrypted T183/T2183 retention (required) | unset |
-| `RETENTION_T2183_ENABLED` | Toggle T2183 retention | `false` |
+| Variable                                                  | Purpose                                       | Default                                             |
+| --------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------- |
+| `FEATURE_EFILE_XML`                                       | Enable XML transmission flow                  | `false`                                             |
+| `FEATURE_LEGACY_EFILE`                                    | Enable legacy EFILE flow                      | `false`                                             |
+| `EFILE_ENV`                                               | Environment selector (`CERT`/`PROD`)          | `CERT`                                              |
+| `EFILE_SOFTWARE_ID_CERT` / `EFILE_SOFTWARE_ID_PROD`       | CRA Software IDs                              | `TAXAPP-CERT`, `TAXAPP-PROD`                        |
+| `EFILE_TRANSMITTER_ID_CERT` / `EFILE_TRANSMITTER_ID_PROD` | CRA Transmitter IDs                           | `900000`, `900001`                                  |
+| `EFILE_ENDPOINT_CERT` / `EFILE_ENDPOINT_PROD`             | CRA endpoints                                 | `http://127.0.0.1:9000`, `https://prod-placeholder` |
+| `SOFTWARE_VERSION`                                        | Application version string                    | `0.0.3`                                             |
+| `T183_CRYPTO_KEY`                                         | Fernet key for encrypted T183/T2183 retention | unset                                               |
+| `RETENTION_T2183_ENABLED`                                 | Toggle T2183 retention                        | `false`                                             |
 
-Set variables in the terminal before launching the preparer API, for example:
+Example (PowerShell):
 
 ```powershell
 set FEATURE_EFILE_XML=true
@@ -172,43 +212,35 @@ set EFILE_ENDPOINT_CERT=https://cra-cert-endpoint
 
 ### Multipart form parsing
 
-The `/ui` routes rely on Starlette's multipart form parser, which now requires
-the `python-multipart` package at runtime. Refresh environments with `pip
-install -r requirements.txt` (or `pip install python-multipart`) before running
-the UI server and validate with `pip show python-multipart` or `python -c
-"import python_multipart"`. Additional rollout guidance lives in the [migration
-notes](docs/efile_suitability.md#migration).
-
-## CRA tooling highlights
-
-- **Schema validation**: XSD-validated T1/T183/T619 XML with `sbmt_ref_id`
-  sequence IDs.
-- **Artifact retention**: encrypted T183 (and optional T2183) storage, purge
-  scripts.
-- **Transmission resilience**: duplicate digest detection, exponential
-  backoff, circuit breaker, masked logging.
-- **Cert support**: `scripts/run_cert_tests.py`, `scripts/replay_payloads.py`,
-  `scripts/reject_scan.py`.
-- **Health visibility**: `/health` includes build metadata, feature flags,
-  schema digests, and last submission ID.
-
-## Testing
-
-Run the full suite:
+The `/ui` routes rely on Starlette’s multipart form parser, which requires
+`python-multipart` at runtime. Refresh environments with:
 
 ```bash
-pytest
+pip install -r requirements.txt
 ```
 
-Golden XML fixtures live in `tests/golden/`; fuzz tests rely on Hypothesis.
+and validate with:
 
-## Additional docs
+```bash
+python -c "import python_multipart"
+```
 
-- [CRA EFILE Suitability Checklist](docs/efile_suitability.md)
-- Scripts folder contains utilities for certification, replay, reject analysis,
-  and the local IFT mock (`scripts/ift_mock.py`).
+Additional rollout guidance lives in the
+`docs/efile_suitability.md#migration` notes.
 
 ---
 
-Need help? See the interactive docs (`/docs`) or open `tests/unit/` for
-examples.
+## CRA tooling highlights
+
+* XSD-validated T1/T183/T619 XML with `sbmt_ref_id` sequence IDs.
+* Encrypted T183 (and optional T2183) storage, plus purge scripts.
+* Duplicate digest detection, backoff, circuit breaker, masked logging.
+* Cert helpers: `scripts/run_cert_tests.py`,
+  `scripts/replay_payloads.py`, `scripts/reject_scan.py`.
+* `/health` includes build metadata, feature flags, schema digests,
+  and last submission ID.
+
+---
+
+Need help? Check the interactive docs (`/docs`) or browse `tests/unit/` for
+usage examples.
