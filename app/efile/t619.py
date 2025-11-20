@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
-from typing import Any, Dict
+from os import PathLike
+from typing import Any, Dict, IO, Literal
 import zipfile
 from xml.dom import minidom
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -178,14 +179,11 @@ def map_t183_fields(req: ReturnInput) -> dict[str, Any]:
     return data
 
 
-def _serialize_payload(documents: dict[str, str]) -> str:
+def _serialize_payload(documents: dict[str, str], zip_cls: type[zipfile.ZipFile]) -> str:
     buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
+    with zip_cls(buffer, mode="w", compression=zipfile.ZIP_STORED) as archive:
         for name in sorted(documents.keys()):
-            info = zipfile.ZipInfo(f"{name}.xml")
-            info.date_time = (2020, 1, 1, 0, 0, 0)
-            info.external_attr = 0o600 << 16
-            archive.writestr(info, documents[name].encode("utf-8"))
+            archive.writestr(f"{name}.xml", documents[name].encode("utf-8"))
     zipped_bytes = buffer.getvalue()
     return base64.b64encode(zipped_bytes).decode("ascii")
 
@@ -213,7 +211,8 @@ def _build_t619_package(
         "T1Return": t1_xml,
         "T183Authorization": t183_xml,
     }
-    payload_blob = _serialize_payload(payload_documents)
+    zip_cls = _zip_file_class()
+    payload_blob = _serialize_payload(payload_documents, zip_cls)
 
     envelope_element = _build_t619_element(profile, payload_blob, sbmt_ref_id)
     envelope_xml = _prettify(envelope_element)
@@ -227,50 +226,54 @@ def _build_t619_package(
         payload_documents=payload_documents,
     )
 
-_T619_STABLE_ZIP_MONKEY = True
+_USE_STABLE_T619_ZIP = True
+_ZIP_FIXED_DATETIME = (2020, 1, 1, 0, 0, 0)
+_ZIP_EXTERNAL_ATTR = 0o600 << 16
+_ZipMode = Literal["r", "w", "x", "a"]
 
 
-def _t619_zipfile_monkey_patch() -> type[zipfile.ZipFile]:
-    """Monkey patches ZipFile to set deterministic metadata."""
+class PatchedZipFile(zipfile.ZipFile):
+    """ZipFile variant that enforces deterministic metadata."""
 
-    import zipfile as _zip
+    def __init__(
+        self,
+        file: str | PathLike[str] | IO[bytes],
+        mode: _ZipMode = "r",
+        compression: int = zipfile.ZIP_STORED,
+        allowZip64: bool = True,
+        compresslevel: int | None = None,
+        strict_timestamps: bool = True,
+    ) -> None:
+        super().__init__(
+            file=file,
+            mode=mode,
+            compression=compression,
+            allowZip64=allowZip64,
+            compresslevel=compresslevel,
+            strict_timestamps=strict_timestamps,
+        )
+        self.compression = compression
 
-    original_zip_file = _zip.ZipFile
+    def writestr(self, zinfo_or_arcname: zipfile.ZipInfo | str, data: bytes | str, *args: Any, **kwargs: Any) -> None:
+        if isinstance(zinfo_or_arcname, str):
+            zip_info = zipfile.ZipInfo(zinfo_or_arcname, date_time=_ZIP_FIXED_DATETIME)
+        else:
+            zip_info = zinfo_or_arcname
+            zip_info.date_time = _ZIP_FIXED_DATETIME
 
-    class _Stable(_zip.ZipFile):
-        def __init__(self, *args, **kwargs) -> None:
-            options = dict(kwargs)
-            options.setdefault("compression", _zip.ZIP_STORED)
-            super().__init__(*args, **options)
-            self.compression = _zip.ZIP_STORED
-
-        def writestr(self, zinfo_or_arcname, data, *args, **kwargs):
-            if isinstance(zinfo_or_arcname, str):
-                zip_info = _zip.ZipInfo(zinfo_or_arcname, date_time=(1980, 1, 1, 0, 0, 0))
-            else:
-                zip_info = zinfo_or_arcname
-                try:
-                    zip_info.date_time = (1980, 1, 1, 0, 0, 0)
-                except Exception:
-                    pass
-
-            try:
-                zip_info.compress_type = getattr(self, "compression", zip_info.compress_type)
-            except Exception:
-                pass
-
-            zip_info.create_system = 0
-            zip_info.external_attr = 0
-            return super().writestr(zip_info, data, *args, **kwargs)
-
-    _zip.ZipFile = _Stable
-    return original_zip_file
+        zip_info.compress_type = getattr(self, "compression", zip_info.compress_type)
+        zip_info.create_system = 3
+        zip_info.external_attr = _ZIP_EXTERNAL_ATTR
+        zip_info.flag_bits = 0
+        zip_info.internal_attr = 0
+        zip_info.volume = 0
+        super().writestr(zip_info, data, *args, **kwargs)
 
 
-def _t619_zipfile_unpatch(original: type[zipfile.ZipFile]) -> None:
-    import zipfile as _zip
-
-    _zip.ZipFile = original
+def _zip_file_class() -> type[zipfile.ZipFile]:
+    if _USE_STABLE_T619_ZIP:
+        return PatchedZipFile
+    return zipfile.ZipFile
 
 
 def build_t619_package(
@@ -280,31 +283,15 @@ def build_t619_package(
     schema_cache: dict[str, str],
     sbmt_ref_id: str,
 ) -> T619Package:
-    if not _T619_STABLE_ZIP_MONKEY:
-        return _build_t619_package(req, calc, profile, schema_cache, sbmt_ref_id)
-
-    original_zip_file = _t619_zipfile_monkey_patch()
-    try:
-        return _build_t619_package(req, calc, profile, schema_cache, sbmt_ref_id)
-    finally:
-        _t619_zipfile_unpatch(original_zip_file)
+    return _build_t619_package(req, calc, profile, schema_cache, sbmt_ref_id)
 
 
 def _stable_zip(file_map: dict[str, bytes | str]) -> bytes:
-    fixed_dt = (1980, 1, 1, 0, 0, 0)
     buffer = BytesIO()
-    with zipfile.ZipFile(buffer, mode="w") as archive:
+    with PatchedZipFile(buffer, mode="w") as archive:
         for name in sorted(file_map):
             data = file_map[name]
             if isinstance(data, str):
                 data = data.encode("utf-8")
-
-            info = zipfile.ZipInfo(filename=name, date_time=fixed_dt)
-            info.create_system = 3
-            info.compress_type = zipfile.ZIP_STORED
-            info.flag_bits = 0
-            info.internal_attr = 0
-            info.external_attr = 0
-            info.volume = 0
-            archive.writestr(info, data)
+            archive.writestr(name, data)
     return buffer.getvalue()
