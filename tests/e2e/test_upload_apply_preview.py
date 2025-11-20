@@ -1,19 +1,12 @@
 """Playwright smoke coverage for the upload → apply → preview UI workflow."""
 
-import sys
-import pytest
-
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32" and sys.version_info >= (3, 13),
-    reason="Playwright not supported on this Python/Windows combo",
-)
-
 from __future__ import annotations
 
 from collections.abc import Iterator
 import importlib
 import os
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -28,6 +21,12 @@ from app.config import get_settings
 import app.ui.router as ui_router_module
 from app.ui import slip_ingest
 from app.wizard import profiles
+
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32" and sys.version_info >= (3, 13),
+    reason="Playwright not supported on this Python/Windows combo",
+)
 
 
 class _LocatorAssertions(Protocol):
@@ -46,7 +45,7 @@ class _ExpectCallable(Protocol):
 
 try:
     _playwright_sync_api = importlib.import_module("playwright.sync_api")
-except ModuleNotFoundError:  # pragma: no cover - exercised only when Playwright missing locally
+except ModuleNotFoundError:
     class _MissingExpect:
         def __call__(self, *args: Any, **kwargs: Any) -> _LocatorAssertions:  # type: ignore[override]
             raise RuntimeError(
