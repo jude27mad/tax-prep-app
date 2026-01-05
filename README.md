@@ -259,5 +259,3 @@ Additional rollout guidance lives in the
 
 Need help? Check the interactive docs (`/docs`) or browse `tests/unit/` for
 usage examples.
-
-```
