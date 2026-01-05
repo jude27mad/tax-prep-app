@@ -7,38 +7,53 @@ returns, and assembling/validating EFILE XML (T619/T1/T183).
 
 ## Repo map 🗺️
 
-
 ```text
-repo-root/
-├─ .github/workflows/        CI: Ruff, mypy, pytest, Playwright
-├─ .hypothesis/constants/    Hypothesis/fuzzing configs
-├─ PyPDF2/                   Local PDF helpers / patches
-├─ app/                      Main application code
-│  ├─ api/                   Preparer FastAPI (T1/T619/T183 HTTP API)
-│  ├─ core/                  Domain models, calculators, validators
-│  ├─ efile/                 XML builders, transmission client, retention logic
-│  ├─ main.py                Estimator FastAPI application
-│  ├─ lifespan.py            Shared startup/shutdown manager
-│  └─ schemas/               CRA XSD cache (T619, T1, T183, etc.)
-├─ docs/                     Operational docs (e.g. CRA suitability checklist)
-├─ inbox/                    Sample inputs / wizard data
-├─ scripts/                  Replay, reject scan, coverage gate, IFT mock, purge
-├─ tests/                    Unit, e2e, golden XML, fuzz suites
-├─ typings/                  Typing fixes / optional stubs
-├─ .env.example              Example env configuration
-├─ .gitignore
-├─ CHANGELOG.md
-├─ License                   Proprietary license (no use without permission)
-├─ README.md                 ← 📍 you are here
-├─ mypy.ini                  Static typing configuration
-├─ pyrightconfig.json        Pyright configuration
-├─ pytest.ini                Pytest configuration
-├─ requirements.txt          Python dependencies
-├─ user_data.example.toml    Sample estimator input
-└─ user_data.toml            Default estimator input
-```
+GitHub Repo Page 🐙 (Code tab)
+├─ File browser 📂 (repo-root/)
+│  ├─ .github/workflows/        CI 🤖: Ruff, mypy, pytest, Playwright
+│  ├─ .hypothesis/constants/    Fuzzing configs (Hypothesis)
+│  ├─ PyPDF2/                   PDF helpers / patches
+│  ├─ app/                      Main application code 🧠
+│  │  ├─ api/                   Preparer API (T1/T619/T183 HTTP)
+│  │  ├─ core/                  Domain models 🧩, calculators 🧮, validators ✅
+│  │  ├─ efile/                 EFILE XML builders + transmission + retention
+│  │  ├─ main.py                Estimator API ⚡ (FastAPI)
+│  │  ├─ lifespan.py            Startup/shutdown manager 🔄
+│  │  └─ schemas/               CRA XSD cache 🗂️ (T619, T1, T183, etc.)
+│  ├─ docs/                     Docs 📚 (CRA suitability, checklist, ops)
+│  ├─ inbox/                    Sample inputs 📥 / wizard data
+│  ├─ scripts/                  Tooling 🛠️ (replay, reject scan, purge, mocks)
+│  ├─ tests/                    Tests (unit, e2e, golden XML, fuzz)
+│  ├─ typings/                  Typing fixes / stubs
+│  ├─ .env.example              Env example
+│  ├─ .gitignore
+│  ├─ CHANGELOG.md              Changelog
+│  ├─ License                   Proprietary license
+│  ├─ README.md                 (this file 📍)
+│  ├─ mypy.ini                  Static typing configuration
+│  ├─ pyrightconfig.json        Pyright configuration
+│  ├─ pytest.ini                Pytest configuration
+│  ├─ requirements.txt          Python dependencies
+│  ├─ user_data.example.toml    Sample estimator input
+│  └─ user_data.toml            Default estimator input
+└─ README preview 👀 (rendered below the file list)  <-- YOU ARE HERE 📍
+   ├─ # Tax App
+   ├─ ## Components
+   │  └─ ### `app/` layout
+   ├─ ## Quick start (single terminal)
+   ├─ ## Native OCR and browser prerequisites
+   ├─ ## Guided wizard (no JSON typing)
+   ├─ ## Provincial coverage
+   ├─ ## Running the APIs
+   │  ├─ ### Estimator (port 8000)
+   │  └─ ### Preparer (port 8001)
+   ├─ ## API schema updates (2025 enhancements)
+   ├─ ## Environment configuration
+   │  └─ ### Multipart form parsing
+   └─ ## CRA tooling highlights
+````
 
-Use this map as the mental “directory sign” at the repo entrance.
+Use this map as the mental "directory sign" at the repo entrance.
 
 ---
 
@@ -87,8 +102,8 @@ pip install -r requirements.txt
 OCR features depend on native binaries in addition to the Python packages listed
 in `requirements.txt`.
 
-* **Tesseract OCR** – install the CLI binary that matches your platform.
-* **Poppler utilities** – required by `pdf2image` for PDF rasterization.
+* **Tesseract OCR** - install the CLI binary that matches your platform.
+* **Poppler utilities** - required by `pdf2image` for PDF rasterization.
 
 CI runners and developer workstations should install these prerequisites before
 running the OCR flows so that `pytesseract` and `pdf2image` can invoke the
@@ -244,3 +259,6 @@ Additional rollout guidance lives in the
 
 Need help? Check the interactive docs (`/docs`) or browse `tests/unit/` for
 usage examples.
+
+```
+
