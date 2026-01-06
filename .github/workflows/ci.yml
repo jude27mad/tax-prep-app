@@ -30,7 +30,6 @@ jobs:
       - run: python -m app.main --data tests/fixtures/user_data.toml --profile sample --quick --color never --no-save
 
   cert-rehearsal:
-    if: github.event_name == 'pull_request'
     needs: test
     runs-on: ubuntu-latest
     steps:
