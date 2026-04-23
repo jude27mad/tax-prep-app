@@ -1290,7 +1290,7 @@ async def upload_slip(
     upload: UploadFile = File(...),
 ) -> JSONResponse:
     settings = _resolve_settings(request)
-    store = slip_ingest.resolve_store(request.app)
+    store = await slip_ingest.resolve_store(request.app)
     try:
         status = await store.process_upload(profile, year, upload, settings=settings)
     except slip_ingest.SlipUploadError as exc:
@@ -1300,7 +1300,7 @@ async def upload_slip(
 
 @router.get("/returns/{profile}/{year}/slips/status", response_class=JSONResponse)
 async def slip_status(request: Request, profile: str, year: int, job_id: str) -> JSONResponse:
-    store = slip_ingest.resolve_store(request.app)
+    store = await slip_ingest.resolve_store(request.app)
     try:
         status = await store.job_status(profile, year, job_id)
     except slip_ingest.SlipJobNotFoundError as exc:
@@ -1315,7 +1315,7 @@ async def apply_slip_detections(
     year: int,
     payload: slip_ingest.ApplyDetectionsRequest,
 ) -> JSONResponse:
-    store = slip_ingest.resolve_store(request.app)
+    store = await slip_ingest.resolve_store(request.app)
     try:
         detections = await store.apply(profile, year, payload.detection_ids)
     except slip_ingest.SlipApplyError as exc:
@@ -1327,7 +1327,7 @@ async def apply_slip_detections(
 
 @router.post("/returns/{profile}/{year}/slips/clear", response_class=JSONResponse)
 async def clear_slip_detections(request: Request, profile: str, year: int) -> JSONResponse:
-    store = slip_ingest.resolve_store(request.app)
+    store = await slip_ingest.resolve_store(request.app)
     await store.clear(profile, year)
     return JSONResponse({"cleared": True})
 
