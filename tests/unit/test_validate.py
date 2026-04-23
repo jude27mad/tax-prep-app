@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.core.models import T4ASlip, T5Slip, TuitionSlip
-from app.core.validate.pre_submit import validate_return_input, validate_before_efile, Identity
+from app.core.validate.pre_submit import validate_return_input, validate_before_efile, Identity, _validate_postal_code
 from tests.fixtures.min_client import make_min_input, make_provincial_examples
 
 
@@ -15,6 +15,25 @@ def test_validate_accepts_provincial_examples():
   for req in examples.values():
     issues = validate_return_input(req)
     assert issues == []
+
+
+def test_validate_postal_code_valid():
+  assert _validate_postal_code("A1A1A1") is True
+  assert _validate_postal_code("A1A 1A1") is True
+  assert _validate_postal_code("a1a1a1") is True
+  assert _validate_postal_code("a1a 1a1") is True
+  assert _validate_postal_code(" a1a1a1 ") is True
+  assert _validate_postal_code("A 1A1A1") is True
+
+
+def test_validate_postal_code_invalid():
+  assert _validate_postal_code("") is False
+  assert _validate_postal_code(None) is False
+  assert _validate_postal_code("A1A1A") is False
+  assert _validate_postal_code("A1A1A1A") is False
+  assert _validate_postal_code("1A1A1A") is False
+  assert _validate_postal_code("A1A1A!") is False
+  assert _validate_postal_code("123456") is False
 
 
 def test_validate_postal_and_year():
