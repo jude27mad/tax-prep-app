@@ -261,3 +261,81 @@ def test_validate_before_efile_t5_foreign_tax_rule():
   issues = validate_before_efile(identity, payload)
   codes = {issue.code for issue in issues}
   assert "60017" in codes
+
+def test_validate_slip_counts_happy_path():
+    from app.core.validate.pre_submit import _validate_slip_counts, IssueTemplate
+    issues = []
+    def emit(template, field):
+        issues.append((template, field))
+
+    limit_issue = IssueTemplate("local_limit", "cra_limit", "message")
+    mismatch_issue = IssueTemplate("local_mismatch", "cra_mismatch", "message")
+
+    # None reported count
+    _validate_slip_counts([1, 2], None, limit_issue, mismatch_issue, emit, "test_collection")
+    assert not issues
+
+    # Matches reported count
+    _validate_slip_counts([1, 2], 2, limit_issue, mismatch_issue, emit, "test_collection")
+    assert not issues
+
+def test_validate_slip_counts_mismatch():
+    from app.core.validate.pre_submit import _validate_slip_counts, IssueTemplate
+    issues = []
+    def emit(template, field):
+        issues.append((template, field))
+
+    limit_issue = IssueTemplate("local_limit", "cra_limit", "message")
+    mismatch_issue = IssueTemplate("local_mismatch", "cra_mismatch", "message")
+
+    # Does not match reported count
+    _validate_slip_counts([1, 2], 3, limit_issue, mismatch_issue, emit, "test_collection")
+    assert len(issues) == 1
+    assert issues[0] == (mismatch_issue, "test_collection")
+
+    issues.clear()
+    # Negative reported count
+    _validate_slip_counts([1, 2], -1, limit_issue, mismatch_issue, emit, "test_collection")
+    assert len(issues) == 1
+    assert issues[0] == (mismatch_issue, "test_collection")
+
+def test_validate_slip_counts_limit():
+    from app.core.validate.pre_submit import _validate_slip_counts, IssueTemplate
+    issues = []
+    def emit(template, field):
+        issues.append((template, field))
+
+    limit_issue = IssueTemplate("local_limit", "cra_limit", "message")
+    mismatch_issue = IssueTemplate("local_mismatch", "cra_mismatch", "message")
+
+    import app.core.validate.pre_submit
+    max_slips = app.core.validate.pre_submit._MAX_SLIPS_PER_TYPE
+
+    # Exceeds max limit but reported_count is None
+    slips = [1] * (max_slips + 1)
+    _validate_slip_counts(slips, None, limit_issue, mismatch_issue, emit, "test_collection")
+    assert len(issues) == 1
+    assert issues[0] == (limit_issue, "test_collection")
+
+    issues.clear()
+    # Exceeds max limit and reported_count matches
+    _validate_slip_counts(slips, max_slips + 1, limit_issue, mismatch_issue, emit, "test_collection")
+    assert set(issues) == {(limit_issue, "test_collection")}
+
+def test_validate_slip_counts_mismatch_and_limit():
+    from app.core.validate.pre_submit import _validate_slip_counts, IssueTemplate
+    issues = []
+    def emit(template, field):
+        issues.append((template, field))
+
+    limit_issue = IssueTemplate("local_limit", "cra_limit", "message")
+    mismatch_issue = IssueTemplate("local_mismatch", "cra_mismatch", "message")
+
+    import app.core.validate.pre_submit
+    max_slips = app.core.validate.pre_submit._MAX_SLIPS_PER_TYPE
+
+    # Reported count exceeds limit but actual does not
+    _validate_slip_counts([1, 2], max_slips + 1, limit_issue, mismatch_issue, emit, "test_collection")
+    assert len(issues) == 2
+    assert (mismatch_issue, "test_collection") in issues
+    assert (limit_issue, "test_collection") in issues
