@@ -333,6 +333,7 @@ def _blank_slip_state(index: int = 0) -> dict[str, Any]:
         "ei_premiums": "",
         "pensionable_earnings": "",
         "insurable_earnings": "",
+        "document_id": "",
     }
 
 
@@ -416,6 +417,7 @@ def _coerce_slip_state(entry: dict[str, Any], fallback_index: int) -> dict[str, 
         "ei_premiums",
         "pensionable_earnings",
         "insurable_earnings",
+        "document_id",
     ):
         slip[key] = _coerce_text(entry.get(key))
     return slip
@@ -608,6 +610,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
             "ei_premiums",
             "pensionable_earnings",
             "insurable_earnings",
+            "document_id",
         ]:
             key = f"slips_t4-{index}-{field}"
             slip_state[field] = _form_text(form.get(key))
@@ -635,6 +638,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
             "ei_premiums",
             "pensionable_earnings",
             "insurable_earnings",
+            "document_id",
         ]:
             value = slip_state.get(field, "").strip()
             if value:
