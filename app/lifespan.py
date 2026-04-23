@@ -12,6 +12,12 @@ import httpx
 from fastapi import FastAPI
 
 from app.config import get_settings
+from app.db import (
+    build_database_url,
+    create_engine as create_db_engine,
+    create_session_factory,
+    dispose_engine,
+)
 
 _SCHEMA_CACHE: dict[str, str] | None = None
 _REGISTERED_FONTS: set[str] = set()
@@ -115,6 +121,10 @@ def build_application_lifespan(
         registered_fonts = _register_reportlab_fonts(logger)
         telemetry_handler = _open_telemetry_sink(logger, app_label)
 
+        database_url = build_database_url(settings)
+        db_engine = create_db_engine(database_url)
+        db_session_factory = create_session_factory(db_engine)
+
         app.state.settings = settings
         app.state.http_client = http_client
         app.state.cra_schema_cache = schema_cache
@@ -126,13 +136,18 @@ def build_application_lifespan(
         app.state.summary_index = {}
         app.state.telemetry_handler = telemetry_handler
         app.state.app_label = app_label
+        app.state.db_engine = db_engine
+        app.state.db_session_factory = db_session_factory
+        app.state.database_url = database_url
 
         logger.info(
-            "Startup complete: schemas=%s fonts_registered=%s feature_efile_xml=%s feature_legacy_efile=%s",
+            "Startup complete: schemas=%s fonts_registered=%s feature_efile_xml=%s "
+            "feature_legacy_efile=%s database_url=%s",
             len(schema_cache),
             len(registered_fonts),
             settings.feature_efile_xml,
             settings.feature_legacy_efile,
+            database_url,
         )
 
         try:
@@ -144,6 +159,10 @@ def build_application_lifespan(
                 await http_client.aclose()
             except Exception as exc:  # pragma: no cover
                 logger.warning("Failed to close shared httpx client: %s", exc)
+            try:
+                await dispose_engine(db_engine)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Failed to dispose DB engine: %s", exc)
             if telemetry_handler is not None:
                 logger.removeHandler(telemetry_handler)
                 telemetry_handler.close()
@@ -160,6 +179,9 @@ def build_application_lifespan(
                 "summary_index",
                 "last_sbmt_ref_id",
                 "app_label",
+                "db_engine",
+                "db_session_factory",
+                "database_url",
             ):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)

@@ -61,6 +61,10 @@ class Settings(BaseModel):
     transmit_circuit_cooldown: float = Field(default_factory=lambda: float(os.getenv("TRANSMIT_CIRCUIT_COOLDOWN", "30")))
     efile_window_open: bool = Field(default_factory=lambda: _env_bool("EFILE_WINDOW_OPEN", False))
     retention_t2183_enabled: bool = Field(default_factory=lambda: _env_bool("RETENTION_T2183_ENABLED", False))
+    # D1.3 — persistent document vault.
+    # When DATABASE_URL is set it wins; otherwise we build a SQLite path from db_path.
+    database_url: str | None = Field(default_factory=lambda: os.getenv("DATABASE_URL"))
+    db_path: str = Field(default_factory=lambda: os.getenv("DB_PATH", "tax_app.db"))
 
     model_config = ConfigDict(frozen=True)
 

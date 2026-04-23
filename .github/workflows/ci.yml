@@ -19,6 +19,14 @@ jobs:
       - run: ruff check .
       - run: mypy app
 
+      - name: Alembic migrations round-trip (D1.3 — persistent document vault)
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///${{ runner.temp }}/ci-migration-check.db
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
       - name: Run tests (non-Playwright)
         run: pytest -q -p no:pytest_playwright -m "not playwright_smoke"
 
