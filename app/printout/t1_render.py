@@ -70,10 +70,13 @@ def _format_date(value: date | None) -> str:
     return value.strftime("%Y-%m-%d")
 
 
+_NON_DIGIT_RE = re.compile(r"\D")
+
+
 def _format_sin(value: str | None) -> str:
     if not value:
         return ""
-    digits = "".join(ch for ch in value if ch.isdigit())
+    digits = _NON_DIGIT_RE.sub("", value)
     if len(digits) == 9:
         return f"{digits[:3]} {digits[3:6]} {digits[6:]}"
     return digits
