@@ -80,14 +80,11 @@ def _format_sin(value: str | None) -> str:
 
 
 def _sum_decimals(values: Iterable[Decimal | None]) -> Decimal:
-    total = Decimal("0.00")
-    for value in values:
-        if value is None:
-            continue
-        if not isinstance(value, Decimal):
-            value = Decimal(str(value))
-        total += value
-    return total
+    return sum(
+        (value if isinstance(value, Decimal) else Decimal(str(value))
+         for value in values if value is not None),
+        start=Decimal("0.00")
+    )
 
 
 def _sanitize_segment(value: str) -> str:
