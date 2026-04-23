@@ -1,0 +1,71 @@
+# Federal tax rules for 2025.
+#
+# All numeric values are quoted strings to preserve exact Decimal precision.
+# Loader at app/core/rules/loader.py rejects bare TOML floats/ints for rate and
+# dollar fields.
+#
+# Each rule section carries citation metadata:
+#   ita_section    — Income Tax Act subsection / paragraph reference
+#   cra_guide_ref  — Canonical CRA publication or T1 General line reference
+#   effective_date — ISO date the rule takes effect (start of the tax year)
+#   prior_year_*   — Optional reference to the prior year's value for diffing
+#
+# This file is the source of truth. app/core/tax_years/y2025/federal.py
+# hydrates its module-level constants from here via load_federal_rules(2025).
+
+[meta]
+tax_year = 2025
+currency = "CAD"
+source = "Income Tax Act R.S.C. 1985 c.1 (5th Supp.); CRA T1 General 2025 Guide"
+
+[brackets]
+description = "Federal income tax brackets for taxable income"
+ita_section = "s.117(2)"
+cra_guide_ref = "T1 General 2025, Step 5 — Federal tax, Part B"
+effective_date = "2025-01-01"
+prior_year_value = "See tax_rules/y2024/federal.toml"
+
+[[brackets.tiers]]
+lower = "0"
+upper = "57375"
+rate = "0.145"
+
+[[brackets.tiers]]
+lower = "57375"
+upper = "114750"
+rate = "0.205"
+
+[[brackets.tiers]]
+lower = "114750"
+upper = "177882"
+rate = "0.26"
+
+[[brackets.tiers]]
+lower = "177882"
+upper = "253414"
+rate = "0.29"
+
+[[brackets.tiers]]
+# Final tier is open-ended: omit 'upper'.
+lower = "253414"
+rate = "0.33"
+
+[bpa]
+description = "Basic Personal Amount with high-income phase-out to floor"
+ita_section = "s.118(1)(c)"
+cra_guide_ref = "T1 General 2025, Line 30000 — Basic Personal Amount; see Worksheet Federal"
+effective_date = "2025-01-01"
+prior_year_full = "15705"
+prior_year_floor = "14156"
+full = "16129"
+floor = "14538"
+phase_start = "177882"
+phase_end = "253414"
+
+[nrtc]
+description = "Rate applied to the sum of non-refundable tax credit amounts"
+ita_section = "s.117.1"
+cra_guide_ref = "T1 General 2025, Step 5 Part C — Line 35000"
+effective_date = "2025-01-01"
+prior_year_value = "0.15"
+rate = "0.145"
