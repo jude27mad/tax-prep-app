@@ -1,22 +1,37 @@
 fastapi>=0.117,<1.0
-python-multipart>=0.0.9,<1.0
+# python-multipart: >=0.0.22 fixes GHSA-wp53 (Arbitrary File Write), >=0.0.26 fixes GHSA-mj87 (DoS via large preamble/epilogue).
+python-multipart>=0.0.26,<1.0
 uvicorn[standard]>=0.30,<1.0
 pydantic>=2.11,<3.0
 httpx>=0.27,<1.0
 anyio>=4.4,<5.0
-python-dotenv>=1.0,<2.0
+# python-dotenv: >=1.2.2 fixes GHSA-mf9w (Symlink following in set_key).
+python-dotenv>=1.2.2,<2.0
 reportlab>=4.2,<5.0
-pytest>=8.4,<9.0
-pytest-asyncio>=0.23,<1.0
+# pytest: >=9.0.3 fixes GHSA-6w46 (vulnerable tmpdir handling). Major-version bump from 8.x.
+pytest>=9.0.3,<10.0
+pytest-asyncio>=1.3.0,<2.0
 ruff>=0.6,<1.0
 mypy>=1.11,<2.0
 xmlschema>=1.11,<5.0
-cryptography>=43.0,<44.0
+# cryptography: >=46.0.5 fixes GHSA-r6ph (SECT curves subgroup attack), >=46.0.6 fixes GHSA-m959 (DNS name constraint). Major bump from 43.x.
+cryptography>=46.0.6,<47.0
 hypothesis>=6.112,<7.0
 jinja2>=3.1,<4.0
 rich>=13.7,<14.0
 pytesseract>=0.3.10,<0.4
 pdf2image>=1.17,<2.0
-pillow>=10.4,<11.0
+# pillow: >=12.1.1 fixes GHSA-cfh3 (OOB write on PSD), >=12.2.0 fixes GHSA-whj4 (FITS GZIP decompression bomb). Major bump from 10.x.
+pillow>=12.2.0,<13.0
 playwright>=1.47,<2.0
-pytest-playwright>=0.5,<0.6
+pytest-playwright>=0.7.2,<1.0
+
+# Transitive dependencies pinned explicitly to pull in security fixes.
+# urllib3: >=2.6.3 fixes GHSA-gm62 (unbounded link chain), GHSA-2xpw (streaming decompression), GHSA-38jv (decompression-bomb on redirect).
+urllib3>=2.6.3,<3.0
+# starlette: >=0.49.1 fixes GHSA-7f5h (O(n^2) DoS via Range header). fastapi 0.136+ allows starlette>=0.46.
+starlette>=0.49.1,<1.0
+# requests: >=2.33.0 fixes GHSA-gc5v (insecure temp file reuse in extract_zipped_paths).
+requests>=2.33.0,<3.0
+# Pygments: >=2.20.0 fixes GHSA-5239 (ReDoS on GUID regex). Transitive via rich.
+Pygments>=2.20.0,<3.0
