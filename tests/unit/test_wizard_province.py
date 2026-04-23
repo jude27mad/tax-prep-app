@@ -1,12 +1,12 @@
 import pytest
 
 from app import main
-from app.tax.dispatch import list_provincial_adapters
+from app.core.provinces import list_provincial_calculators
 
 
 def test_wizard_province_choices_match_dispatch() -> None:
     expected = tuple(
-        (adapter.code, adapter.name) for adapter in list_provincial_adapters(2025)
+        (calc.code, calc.name) for calc in list_provincial_calculators(2025)
     )
     assert main._FIELD_METADATA["province"]["choices"] == expected
 

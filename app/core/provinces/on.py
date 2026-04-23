@@ -17,16 +17,34 @@ ON_BPA_2024 = D("12399")
 SURTAX_T1_2024 = (D("5554"), D("0.20"))
 SURTAX_T2_2024 = (D("7108"), D("0.36"))
 
+# Ontario Health Premium (OHP) schedule per ON Ministry of Finance
+# (Taxation Act 2007, s.2.2). Each ramp covers a narrow income band where the
+# premium phases up at 25% to the next plateau, then is capped at the plateau
+# for all higher incomes inside that bracket.
+#
+# Ramp boundaries (income → premium):
+#   $20,000–$25,000  : 6% phase-in to $300
+#   $25,000–$36,000  : flat $300
+#   $36,000–$38,500  : 6% phase-in to $450
+#   $38,500–$48,000  : flat $450
+#   $48,000–$48,600  : 25% phase-in to $600
+#   $48,600–$72,000  : flat $600
+#   $72,000–$72,600  : 25% phase-in to $750
+#   $72,600–$200,000 : flat $750
+#   $200,000–$200,600: 25% phase-in to $900
+#   $200,600+        : flat $900
 OHP_STEPS_2024 = [
-    (D("0"),      D("20000"),  lambda ti: D("0")),
-    (D("20000"),  D("25000"),  lambda ti: (ti - D("20000")) * D("0.06")),
-    (D("25000"),  D("36000"),  lambda ti: D("300")),
-    (D("36000"),  D("38500"),  lambda ti: D("300") + (ti - D("36000")) * D("0.06")),
-    (D("38500"),  D("48600"),  lambda ti: D("450")),
-    (D("48600"),  D("72000"),  lambda ti: D("450") + (ti - D("48600")) * D("0.25")),
-    (D("72000"),  D("200000"), lambda ti: D("600") + (ti - D("72000")) * D("0.25")),
-    (D("200000"), D("220000"), lambda ti: D("750") + (ti - D("200000")) * D("0.25")),
-    (D("220000"), None,         lambda ti: D("900")),
+    (D("0"),       D("20000"),  lambda ti: D("0")),
+    (D("20000"),   D("25000"),  lambda ti: (ti - D("20000")) * D("0.06")),
+    (D("25000"),   D("36000"),  lambda ti: D("300")),
+    (D("36000"),   D("38500"),  lambda ti: D("300") + (ti - D("36000")) * D("0.06")),
+    (D("38500"),   D("48000"),  lambda ti: D("450")),
+    (D("48000"),   D("48600"),  lambda ti: D("450") + (ti - D("48000")) * D("0.25")),
+    (D("48600"),   D("72000"),  lambda ti: D("600")),
+    (D("72000"),   D("72600"),  lambda ti: D("600") + (ti - D("72000")) * D("0.25")),
+    (D("72600"),   D("200000"), lambda ti: D("750")),
+    (D("200000"),  D("200600"), lambda ti: D("750") + (ti - D("200000")) * D("0.25")),
+    (D("200600"),  None,        lambda ti: D("900")),
 ]
 
 
