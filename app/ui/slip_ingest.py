@@ -7,7 +7,7 @@ import mimetypes
 import re
 import secrets
 import tempfile
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -16,8 +16,19 @@ from typing import Any, Iterable, Literal
 from fastapi import UploadFile
 from pydantic import BaseModel, Field, ConfigDict
 from PyPDF2 import PdfReader
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import select
 
 from app.config import Settings
+from app.db import (
+    Base,
+    DocumentRow,
+    DocumentSource,
+    DocumentStatus,
+    create_session_factory,
+    session_scope,
+)
 from app.wizard import BASE_DIR, slugify
 
 __all__ = [
@@ -83,38 +94,50 @@ class SlipJobStatus(BaseModel):
     error: str | None = None
 
 
-@dataclass
-class _SlipJobRecord:
-    job_id: str
-    bucket: str
-    original_filename: str
-    status: Literal["processing", "complete", "error"] = "processing"
-    detection: SlipDetection | None = None
-    error: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    def to_status(self) -> SlipJobStatus:
-        return SlipJobStatus(
-            job_id=self.job_id,
-            status=self.status,
-            detection=self.detection,
-            error=self.error,
-        )
-
-
 class ApplyDetectionsRequest(BaseModel):
     detection_ids: list[str] | None = None
 
 
-class SlipStagingStore:
-    def __init__(self) -> None:
-        self._jobs: dict[str, _SlipJobRecord] = {}
-        self._staged: dict[str, dict[str, SlipDetection]] = {}
-        self._lock = asyncio.Lock()
+def _detection_from_row(row: DocumentRow) -> SlipDetection:
+    fields_raw: dict[str, Any] = row.raw_fields or {}
+    return SlipDetection(
+        id=row.id,
+        slip_type=row.slip_type,
+        original_filename=row.original_filename,
+        stored_filename=row.stored_filename or "",
+        stored_path=row.stored_path or "",
+        size=row.size_bytes,
+        preview=row.preview_text or "",
+        fields={str(k): str(v) for k, v in fields_raw.items()},
+        warnings=list(row.warnings or []),
+        created_at=row.created_at,
+    )
 
-    @staticmethod
-    def _bucket(profile: str, year: int) -> str:
-        return f"{profile}:{year}"
+
+def _status_from_row(row: DocumentRow) -> SlipJobStatus:
+    if row.status == DocumentStatus.ERROR.value:
+        return SlipJobStatus(job_id=row.id, status="error", error=row.error_message)
+    if row.status == DocumentStatus.PROCESSING.value:
+        return SlipJobStatus(job_id=row.id, status="processing")
+    # COMPLETE and APPLIED both expose the detection to the caller; APPLIED
+    # is treated as terminal "complete" from the UI's perspective because
+    # the detection already landed on the return.
+    return SlipJobStatus(
+        job_id=row.id, status="complete", detection=_detection_from_row(row)
+    )
+
+
+class SlipStagingStore:
+    """DB-backed staging store. Writes through to the ``documents`` table
+    (see :class:`app.db.models.DocumentRow`). A PROCESSING row is inserted
+    on upload receipt, then updated to COMPLETE (with detection fields) or
+    ERROR (with message) as extraction finishes. ``apply()`` flips rows
+    COMPLETE → APPLIED; ``clear()`` deletes COMPLETE rows but preserves
+    APPLIED rows as an audit trail.
+    """
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._factory = session_factory
 
     async def process_upload(
         self,
@@ -125,50 +148,75 @@ class SlipStagingStore:
         settings: Settings,
     ) -> SlipJobStatus:
         safe_profile = slugify(profile) or "default"
-        bucket = self._bucket(safe_profile, year)
-        job_id = secrets.token_hex(8)
-        record = _SlipJobRecord(
-            job_id=job_id,
-            bucket=bucket,
-            original_filename=upload.filename or "",
-        )
-        async with self._lock:
-            self._jobs[job_id] = record
+        filename = upload.filename or ""
+        doc_id = str(uuid.uuid4())
+
+        async with session_scope(self._factory) as session:
+            session.add(
+                DocumentRow(
+                    id=doc_id,
+                    profile_slug=safe_profile,
+                    tax_year=int(year),
+                    source_type=DocumentSource.UPLOAD.value,
+                    slip_type="unknown",
+                    status=DocumentStatus.PROCESSING.value,
+                    original_filename=filename,
+                    raw_fields={},
+                    warnings=[],
+                )
+            )
+
         try:
             detection = await _ingest_upload(
-                job_id, safe_profile, year, upload, settings=settings
+                doc_id, safe_profile, int(year), upload, settings=settings
             )
         except SlipUploadError as exc:
-            record.status = "error"
-            record.error = str(exc)
-            async with self._lock:
-                self._jobs[job_id] = record
+            await self._mark_error(doc_id, str(exc))
             raise
         except Exception as exc:
-            record.status = "error"
-            record.error = "Unable to process slip"
-            async with self._lock:
-                self._jobs[job_id] = record
+            await self._mark_error(doc_id, "Unable to process slip")
             raise SlipUploadError("Unable to process slip") from exc
         else:
-            record.status = "complete"
-            record.detection = detection
-            async with self._lock:
-                self._jobs[job_id] = record
-                staged = self._staged.setdefault(bucket, {})
-                staged[detection.id] = detection
-            return record.to_status()
+            await self._mark_complete(doc_id, detection)
+            return SlipJobStatus(
+                job_id=doc_id, status="complete", detection=detection
+            )
         finally:
             await upload.close()
 
+    async def _mark_error(self, doc_id: str, message: str) -> None:
+        async with session_scope(self._factory) as session:
+            row = await session.get(DocumentRow, doc_id)
+            if row is None:
+                return
+            row.status = DocumentStatus.ERROR.value
+            row.error_message = message[:2048]
+
+    async def _mark_complete(self, doc_id: str, detection: SlipDetection) -> None:
+        async with session_scope(self._factory) as session:
+            row = await session.get(DocumentRow, doc_id)
+            if row is None:
+                return
+            row.slip_type = detection.slip_type
+            row.status = DocumentStatus.COMPLETE.value
+            row.stored_filename = detection.stored_filename or None
+            row.stored_path = detection.stored_path or None
+            row.size_bytes = detection.size
+            row.preview_text = detection.preview or None
+            row.raw_fields = dict(detection.fields)
+            row.warnings = list(detection.warnings)
+
     async def job_status(self, profile: str, year: int, job_id: str) -> SlipJobStatus:
         safe_profile = slugify(profile) or "default"
-        bucket = self._bucket(safe_profile, year)
-        async with self._lock:
-            record = self._jobs.get(job_id)
-        if record is None or record.bucket != bucket:
-            raise SlipJobNotFoundError("Upload job not found")
-        return record.to_status()
+        async with session_scope(self._factory) as session:
+            row = await session.get(DocumentRow, job_id)
+            if (
+                row is None
+                or row.profile_slug != safe_profile
+                or row.tax_year != int(year)
+            ):
+                raise SlipJobNotFoundError("Upload job not found")
+            return _status_from_row(row)
 
     async def apply(
         self,
@@ -177,47 +225,95 @@ class SlipStagingStore:
         detection_ids: Iterable[str] | None = None,
     ) -> list[SlipDetection]:
         safe_profile = slugify(profile) or "default"
-        bucket = self._bucket(safe_profile, year)
-        async with self._lock:
-            staged = self._staged.get(bucket)
-            if not staged:
-                return []
+        async with session_scope(self._factory) as session:
+            stmt = (
+                select(DocumentRow)
+                .where(DocumentRow.profile_slug == safe_profile)
+                .where(DocumentRow.tax_year == int(year))
+                .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
+            )
+            result = await session.execute(stmt)
+            rows = list(result.scalars().all())
+            by_id = {row.id: row for row in rows}
 
             if detection_ids is None:
-                all_detections = list(staged.values())
-                self._staged.pop(bucket, None)
-                return all_detections
+                selected = list(rows)
+            else:
+                requested = list(detection_ids)
+                selected = []
+                for detection_id in requested:
+                    row = by_id.get(detection_id)
+                    if row is None:
+                        raise SlipApplyError(
+                            f"Detection {detection_id} not found for profile"
+                        )
+                    selected.append(row)
 
-            selected: list[SlipDetection] = []
-            for detection_id in detection_ids:
-                detection = staged.pop(detection_id, None)
-                if detection is None:
-                    raise SlipApplyError(f"Detection {detection_id} not found for profile")
-                selected.append(detection)
+            applied: list[SlipDetection] = []
+            for row in selected:
+                applied.append(_detection_from_row(row))
+                row.status = DocumentStatus.APPLIED.value
 
-            if not staged:
-                self._staged.pop(bucket, None)
-
-            return selected
+            return applied
 
     async def clear(self, profile: str, year: int) -> None:
         safe_profile = slugify(profile) or "default"
-        bucket = self._bucket(safe_profile, year)
-        async with self._lock:
-            self._staged.pop(bucket, None)
+        async with session_scope(self._factory) as session:
+            stmt = (
+                select(DocumentRow)
+                .where(DocumentRow.profile_slug == safe_profile)
+                .where(DocumentRow.tax_year == int(year))
+                .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
+            )
+            result = await session.execute(stmt)
+            for row in result.scalars().all():
+                await session.delete(row)
 
 
-_DEFAULT_STORE = SlipStagingStore()
+_DEFAULT_STORE: SlipStagingStore | None = None
+_DEFAULT_STORE_LOCK = asyncio.Lock()
 
 
-def resolve_store(app: Any | None = None) -> SlipStagingStore:
-    if app is None:
+async def _get_default_store() -> SlipStagingStore:
+    """Lazily build an in-memory SlipStagingStore for callers that don't
+    supply a FastAPI app (e.g. the ``ingest_slip_uploads`` helper invoked
+    outside the lifespan). Uses a StaticPool single-connection sqlite so
+    the schema and rows stay visible across sessions in one process.
+    """
+    global _DEFAULT_STORE
+    async with _DEFAULT_STORE_LOCK:
+        if _DEFAULT_STORE is None:
+            engine = create_async_engine(
+                "sqlite+aiosqlite:///:memory:",
+                connect_args={"check_same_thread": False},
+                poolclass=StaticPool,
+            )
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            factory = create_session_factory(engine)
+            _DEFAULT_STORE = SlipStagingStore(factory)
         return _DEFAULT_STORE
-    store = getattr(app.state, "slip_staging_store", None)
-    if isinstance(store, SlipStagingStore):
-        return store
-    store = SlipStagingStore()
-    setattr(app.state, "slip_staging_store", store)
+
+
+async def resolve_store(app: Any | None = None) -> SlipStagingStore:
+    """Return the SlipStagingStore bound to the given FastAPI app, or the
+    lazy module-level default if ``app`` is None. When ``app.state`` has a
+    pre-wired ``slip_staging_store`` we honor it (used by tests); otherwise
+    we build one from ``app.state.db_session_factory`` and cache it.
+    """
+    if app is None:
+        return await _get_default_store()
+    existing = getattr(app.state, "slip_staging_store", None)
+    if isinstance(existing, SlipStagingStore):
+        return existing
+    factory = getattr(app.state, "db_session_factory", None)
+    if factory is None:
+        raise RuntimeError(
+            "db_session_factory not wired on app.state; "
+            "ensure app.lifespan is running or set app.state.slip_staging_store manually."
+        )
+    store = SlipStagingStore(factory)
+    app.state.slip_staging_store = store
     return store
 
 
@@ -490,7 +586,7 @@ async def ingest_slip_uploads(
 ) -> tuple[list[SlipDetection], list[str]]:
     year_val = year if year is not None else datetime.now(timezone.utc).year
     cfg = settings or Settings()
-    store = resolve_store(app)
+    store = await resolve_store(app)
     detections: list[SlipDetection] = []
     errors: list[str] = []
     for upload in uploads:
@@ -532,7 +628,7 @@ async def slip_job_status(
     *,
     app: Any | None = None,
 ) -> SlipJobStatus:
-    store = resolve_store(app)
+    store = await resolve_store(app)
     return await store.job_status(profile, year, job_id)
 
 
@@ -543,6 +639,5 @@ async def apply_staged_detections(
     *,
     app: Any | None = None,
 ) -> list[SlipDetection]:
-    store = resolve_store(app)
+    store = await resolve_store(app)
     return await store.apply(profile, year, detection_ids)
-

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 import importlib
 import os
@@ -15,9 +16,12 @@ from typing import Any, Protocol, cast
 import pytest
 import uvicorn
 from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import StaticPool
 
 import app.wizard as wizard
 from app.config import get_settings
+from app.db import Base, create_session_factory
 import app.ui.router as ui_router_module
 from app.ui import slip_ingest
 from app.wizard import profiles
@@ -97,6 +101,7 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     original_default_store = slip_ingest._DEFAULT_STORE  # type: ignore[attr-defined]
     server: uvicorn.Server | None = None
     thread: threading.Thread | None = None
+    test_db_engine = None
 
     try:
         os.environ["ARTIFACT_ROOT"] = str(artifact_root)
@@ -115,7 +120,7 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         ui_router_module.BASE_DIR = base_dir
         ui_router_module.PROFILE_DRAFTS_ROOT = profiles.PROFILES_DIR
         slip_ingest.BASE_DIR = base_dir
-        slip_ingest._DEFAULT_STORE = slip_ingest.SlipStagingStore()  # type: ignore[attr-defined]
+        slip_ingest._DEFAULT_STORE = None  # type: ignore[attr-defined]
 
         profiles.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
         profiles.PROFILE_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -124,9 +129,23 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
         profiles.save_profile_data("playwright-smoke", {"province": "ON", "tax_year": 2025})
 
+        test_db_engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+
+        async def _init_db() -> None:
+            async with test_db_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+        asyncio.run(_init_db())
+        test_session_factory = create_session_factory(test_db_engine)
+
         app = FastAPI()
         app.include_router(ui_router_module.router)
-        app.state.slip_staging_store = slip_ingest.SlipStagingStore()
+        app.state.db_session_factory = test_session_factory
+        app.state.slip_staging_store = slip_ingest.SlipStagingStore(test_session_factory)
         app.state.settings = settings
 
         host = "127.0.0.1"
@@ -173,6 +192,8 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         ui_router_module.PROFILE_DRAFTS_ROOT = original_router_drafts
         slip_ingest.BASE_DIR = original_slip_ingest_base
         slip_ingest._DEFAULT_STORE = original_default_store  # type: ignore[attr-defined]
+        if test_db_engine is not None:
+            asyncio.run(test_db_engine.dispose())
         get_settings.cache_clear()
 
 
