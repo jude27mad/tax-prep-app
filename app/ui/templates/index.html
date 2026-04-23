@@ -2,13 +2,13 @@
 
 {% block content %}
   <div class="card">
-    <h2>Profiles</h2>
+    <h2>{{ t("profiles.heading") }}</h2>
     {% if profiles %}
       <table class="striped">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Actions</th>
+            <th>{{ t("profiles.name") }}</th>
+            <th>{{ t("profiles.actions") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -16,18 +16,18 @@
             <tr>
               <td>
                 {% if active == slug %}
-                  <strong>{{ slug }}</strong> <span style="color:#16a34a;">(active)</span>
+                  <strong>{{ slug }}</strong> <span style="color:#16a34a;">{{ t("profiles.active") }}</span>
                 {% else %}
                   {{ slug }}
                 {% endif %}
               </td>
               <td>
-                <a class="btn" href="/ui/profiles/{{ slug }}">Open</a>
+                <a class="btn" href="/ui/profiles/{{ slug }}">{{ t("profiles.open") }}</a>
                 <form class="inline" method="post" action="/ui/profiles/{{ slug }}/set-active">
-                  <button type="submit" class="btn secondary">Set active</button>
+                  <button type="submit" class="btn secondary">{{ t("profiles.set_active") }}</button>
                 </form>
-                <form class="inline" method="post" action="/ui/profiles/{{ slug }}/delete" onsubmit="return confirm('Move this profile to trash?');">
-                  <button type="submit" class="btn danger">Delete</button>
+                <form class="inline" method="post" action="/ui/profiles/{{ slug }}/delete" onsubmit="return confirm('{{ t("profiles.delete_confirm") }}');">
+                  <button type="submit" class="btn danger">{{ t("profiles.delete") }}</button>
                 </form>
               </td>
             </tr>
@@ -35,24 +35,24 @@
         </tbody>
       </table>
     {% else %}
-      <p>No profiles saved yet. Create one below to get started.</p>
+      <p>{{ t("profiles.empty") }}</p>
     {% endif %}
-    <h3>Create a new profile</h3>
+    <h3>{{ t("profiles.create_heading") }}</h3>
     <form method="post" action="/ui/profiles">
-      <label for="profile-name">Profile name</label><br />
-      <input id="profile-name" name="name" type="text" required placeholder="e.g., alice" />
-      <button type="submit" class="btn">Create</button>
+      <label for="profile-name">{{ t("profiles.name_label") }}</label><br />
+      <input id="profile-name" name="name" type="text" required placeholder="{{ t('profiles.name_placeholder') }}" />
+      <button type="submit" class="btn">{{ t("common.create") }}</button>
     </form>
   </div>
 
   <div class="card">
-    <h2>Recently deleted</h2>
+    <h2>{{ t("trash.heading") }}</h2>
     {% if trashed %}
       <table class="striped">
         <thead>
           <tr>
-            <th>Profile</th>
-            <th>Deleted</th>
+            <th>{{ t("trash.profile") }}</th>
+            <th>{{ t("trash.deleted") }}</th>
             <th></th>
           </tr>
         </thead>
@@ -69,7 +69,7 @@
               </td>
               <td>
                 <form class="inline" method="post" action="/ui/profiles/{{ entry.slug }}/restore">
-                  <button type="submit" class="btn">Restore</button>
+                  <button type="submit" class="btn">{{ t("trash.restore") }}</button>
                 </form>
               </td>
             </tr>
@@ -77,7 +77,7 @@
         </tbody>
       </table>
     {% else %}
-      <p>The trash is empty.</p>
+      <p>{{ t("trash.empty") }}</p>
     {% endif %}
   </div>
 {% endblock %}
