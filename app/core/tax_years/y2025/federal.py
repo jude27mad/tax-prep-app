@@ -1,22 +1,34 @@
+"""Federal tax calculators for tax year 2025.
+
+The brackets, Basic Personal Amount, and NRTC rate are loaded from
+``tax_rules/y2025/federal.toml`` via :mod:`app.core.rules`. The module-level
+constants exported here (``BRACKETS_2025``, ``BPA_FULL_2025``, etc.) preserve
+the same names and shapes they had when the values were hardcoded, so
+callers do not need to change.
+
+See strategy plan D1.2 / E6: rules-as-data migration with ITA / CRA guide
+citations attached to every value.
+"""
+
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
+from app.core.rules import load_federal_rules
+
 D = Decimal
 
-BRACKETS_2025 = [
-    (D("0"),       D("57375"),  D("0.145")),
-    (D("57375"),   D("114750"), D("0.205")),
-    (D("114750"),  D("177882"), D("0.26")),
-    (D("177882"),  D("253414"), D("0.29")),
-    (D("253414"),  None,        D("0.33")),
+_RULES = load_federal_rules(2025)
+
+BRACKETS_2025: list[tuple[Decimal, Decimal | None, Decimal]] = [
+    (tier.lower, tier.upper, tier.rate) for tier in _RULES.brackets.tiers
 ]
 
-BPA_FULL_2025 = D("16129")
-BPA_FLOOR_2025 = D("14538")
-BPA_PHASE_START_2025 = D("177882")
-BPA_PHASE_END_2025 = D("253414")
-NRTC_RATE_2025 = D("0.145")
+BPA_FULL_2025 = _RULES.bpa.full
+BPA_FLOOR_2025 = _RULES.bpa.floor
+BPA_PHASE_START_2025 = _RULES.bpa.phase_start
+BPA_PHASE_END_2025 = _RULES.bpa.phase_end
+NRTC_RATE_2025 = _RULES.nrtc.rate
 
 
 def federal_bpa_2025(net_income: D) -> D:

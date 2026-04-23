@@ -1,0 +1,61 @@
+# Federal tax rules for 2024.
+#
+# All numeric values are quoted strings to preserve exact Decimal precision.
+# Loader at app/core/rules/loader.py rejects bare TOML floats/ints for rate and
+# dollar fields.
+#
+# This file is the source of truth. app/core/tax_years/y2024/federal.py
+# hydrates its module-level constants from here via load_federal_rules(2024).
+
+[meta]
+tax_year = 2024
+currency = "CAD"
+source = "Income Tax Act R.S.C. 1985 c.1 (5th Supp.); CRA T1 General 2024 Guide"
+
+[brackets]
+description = "Federal income tax brackets for taxable income"
+ita_section = "s.117(2)"
+cra_guide_ref = "T1 General 2024, Step 5 — Federal tax, Part B"
+effective_date = "2024-01-01"
+
+[[brackets.tiers]]
+lower = "0"
+upper = "55867"
+rate = "0.15"
+
+[[brackets.tiers]]
+lower = "55867"
+upper = "111733"
+rate = "0.205"
+
+[[brackets.tiers]]
+lower = "111733"
+upper = "173205"
+rate = "0.26"
+
+[[brackets.tiers]]
+lower = "173205"
+upper = "246752"
+rate = "0.29"
+
+[[brackets.tiers]]
+# Final tier is open-ended: omit 'upper'.
+lower = "246752"
+rate = "0.33"
+
+[bpa]
+description = "Basic Personal Amount with high-income phase-out to floor"
+ita_section = "s.118(1)(c)"
+cra_guide_ref = "T1 General 2024, Line 30000 — Basic Personal Amount; see Worksheet Federal"
+effective_date = "2024-01-01"
+full = "15705"
+floor = "14156"
+phase_start = "173205"
+phase_end = "246752"
+
+[nrtc]
+description = "Rate applied to the sum of non-refundable tax credit amounts"
+ita_section = "s.117.1"
+cra_guide_ref = "T1 General 2024, Step 5 Part C — Line 35000"
+effective_date = "2024-01-01"
+rate = "0.15"
