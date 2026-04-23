@@ -236,7 +236,8 @@ async def _ingest_upload(
     size = len(data)
     extension = _resolve_extension(filename, upload.content_type)
     _validate_upload(extension, size)
-    text = _extract_text(extension, data)
+    loop = asyncio.get_running_loop()
+    text = await loop.run_in_executor(None, _extract_text, extension, data)
     if not text.strip():
         raise SlipUploadError("Unable to extract text from upload")
     slip_type = _classify_slip(text)
