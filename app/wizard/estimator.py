@@ -5,21 +5,27 @@ from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from app.tax.ca2025 import (
-    FEDERAL_2025,
-    FED_CREDIT_RATE,
-    federal_bpa_2025,
-    tax_from_brackets as fed_tax,
+from app.core.provinces import (
+    UnknownProvinceError,
+    get_provincial_calculator,
 )
-from app.tax.dispatch import UnknownProvinceError, get_provincial_adapter
+from app.core.tax_years.y2025.federal import (
+    NRTC_RATE_2025 as FED_CREDIT_RATE_2025,
+    federal_bpa_2025,
+    federal_tax_2025,
+)
 
-CPP_BASE_EXEMPTION = 3_500.0
-CPP_YMPE_2025 = 71_300.0
-CPP_YAMPE_2025 = 81_200.0
-CPP_RATE_2025 = 0.0595
-CPP2_RATE_2025 = 0.04
-EI_MIE_2025 = 65_700.0
-EI_RATE_2025 = 0.0164
+# Estimator constants. CPP/EI thresholds are local to the wizard because the
+# estimator's job is to validate T4 box totals against statutory maxima — these
+# numbers do not flow into the Decimal compute path. If/when a 2026 estimator
+# lands these will need their own module.
+CPP_BASE_EXEMPTION = Decimal("3500")
+CPP_YMPE_2025 = Decimal("71300")
+CPP_YAMPE_2025 = Decimal("81200")
+CPP_RATE_2025 = Decimal("0.0595")
+CPP2_RATE_2025 = Decimal("0.04")
+EI_MIE_2025 = Decimal("65700")
+EI_RATE_2025 = Decimal("0.0164")
 _TOLERANCE = 0.05  # forgive minor payroll rounding
 _CENT = Decimal("0.01")
 
@@ -74,65 +80,92 @@ def round_cents(value: float | Decimal) -> float:
     return float(to_decimal(value).quantize(_CENT, rounding=ROUND_HALF_UP))
 
 
+def _quantize(value: Decimal) -> Decimal:
+    return value.quantize(_CENT, rounding=ROUND_HALF_UP)
+
+
 def compute_tax_summary(income: float, rrsp: float, province: str) -> dict[str, Any]:
-    taxable = max(0.0, income - max(rrsp, 0.0))
+    """Estimator-level Decimal compute that returns a JSON-friendly summary dict.
 
-    federal_before = fed_tax(taxable, FEDERAL_2025)
-    fed_bpa = federal_bpa_2025(taxable)
-    federal_after = max(0.0, round_cents(federal_before - FED_CREDIT_RATE * fed_bpa))
+    Output shape is preserved from the prior float implementation so existing
+    callers (CLI wizard preview, /tax/estimate endpoint, T4 endpoint) keep
+    working. Internal arithmetic now flows through the canonical Decimal path
+    (app/core/tax_years/y2025/federal + app/core/provinces) — the float
+    duplicate at app/tax/* is being retired.
 
+    Behaviour deltas vs the prior float implementation:
+      * Provincial ``additions`` keys reflect Decimal-side names. For Ontario
+        this means ``ontario_surtax``/``ontario_health_premium`` instead of
+        the legacy ``surtax``/``health_premium``.
+      * Provincial ``before_credits`` and ``additions`` values may differ by a
+        cent or by the OHP step boundary in narrow income bands; the Decimal
+        path is the canonical source of truth.
+    """
+    income_dec = to_decimal(income)
+    rrsp_dec = max(Decimal("0"), to_decimal(rrsp))
+    taxable_dec = max(Decimal("0"), income_dec - rrsp_dec)
+
+    # Federal
+    federal_before = federal_tax_2025(taxable_dec)
+    fed_bpa = federal_bpa_2025(taxable_dec)
+    fed_credit_amount = (fed_bpa * FED_CREDIT_RATE_2025).quantize(_CENT, rounding=ROUND_HALF_UP)
+    federal_after = max(Decimal("0"), federal_before - fed_credit_amount)
+
+    # Provincial
     province_code = (province or "ON").upper()
     try:
-        adapter = get_provincial_adapter(2025, province_code)
+        calculator = get_provincial_calculator(2025, province_code)
     except UnknownProvinceError as exc:
         raise ValueError(str(exc)) from exc
 
-    provincial = adapter.compute(taxable)
-    total_net_tax = round_cents(to_decimal(federal_after) + to_decimal(provincial.net_tax))
+    prov_before = calculator.tax(taxable_dec)
+    prov_credit_amount = calculator.credits()
+    prov_after = max(Decimal("0"), prov_before - prov_credit_amount)
+    additions_map = dict(calculator.additions(taxable_dec, prov_before, prov_credit_amount))
+    additions_total = sum(additions_map.values(), Decimal("0"))
+    prov_net = _quantize(prov_after + additions_total)
+    bpa_used = min(calculator.bpa, taxable_dec)
+
+    total_net_tax = _quantize(federal_after + prov_net)
 
     return {
         "income": income,
         "rrsp": rrsp,
-        "taxable_income": taxable,
-        "province": provincial.province_code,
+        "taxable_income": float(_quantize(taxable_dec)),
+        "province": calculator.code or province_code,
         "federal": {
-            "before_credits": federal_before,
-            "bpa_used": fed_bpa,
-            "after_credits": federal_after,
+            "before_credits": float(federal_before),
+            "bpa_used": float(fed_bpa),
+            "after_credits": float(_quantize(federal_after)),
         },
         "provincial": {
-            "province_code": provincial.province_code,
-            "province_name": provincial.province_name,
-            "before_credits": provincial.before_credits,
-            "bpa_used": provincial.bpa_used,
-            "credit_rate": provincial.credit_rate,
-            "after_credits": provincial.after_credits,
-            "additions": provincial.additions,
-            "net_provincial": provincial.net_tax,
+            "province_code": calculator.code or province_code,
+            "province_name": calculator.name,
+            "before_credits": float(prov_before),
+            "bpa_used": float(_quantize(bpa_used)),
+            "credit_rate": float(calculator.nrtc_rate),
+            "after_credits": float(_quantize(prov_after)),
+            "additions": {k: float(_quantize(v)) for k, v in additions_map.items()},
+            "net_provincial": float(prov_net),
         },
-        "total_net_tax": total_net_tax,
+        "total_net_tax": float(total_net_tax),
     }
 
 
 def expected_cpp_contributions(income: float) -> tuple[float, float]:
     income_dec = to_decimal(income)
-    ympe = to_decimal(CPP_YMPE_2025)
-    base = to_decimal(CPP_BASE_EXEMPTION)
-    pensionable = max(Decimal("0"), min(income_dec, ympe) - base)
-    cpp_regular = round_cents(pensionable * to_decimal(CPP_RATE_2025))
+    pensionable = max(Decimal("0"), min(income_dec, CPP_YMPE_2025) - CPP_BASE_EXEMPTION)
+    cpp_regular = round_cents(pensionable * CPP_RATE_2025)
 
-    yamp = to_decimal(CPP_YAMPE_2025)
-    additional_earnings = max(Decimal("0"), min(income_dec, yamp) - ympe)
-    cpp_additional = round_cents(additional_earnings * to_decimal(CPP2_RATE_2025))
+    additional_earnings = max(Decimal("0"), min(income_dec, CPP_YAMPE_2025) - CPP_YMPE_2025)
+    cpp_additional = round_cents(additional_earnings * CPP2_RATE_2025)
 
     return cpp_regular, cpp_additional
 
 
 def expected_ei_contribution(income: float) -> float:
     income_dec = to_decimal(income)
-    mie = to_decimal(EI_MIE_2025)
-    rate = to_decimal(EI_RATE_2025)
-    return round_cents(min(income_dec, mie) * rate)
+    return round_cents(min(income_dec, EI_MIE_2025) * EI_RATE_2025)
 
 
 def within_limit(actual: float, maximum: float) -> bool:
