@@ -18,6 +18,7 @@ class T4ASlip(BaseModel):
     self_employment_commissions: Decimal | None = None
     research_grants: Decimal | None = None
     tax_deducted: Decimal | None = None
+    document_id: str | None = None
 
     _quantize_optional_fields = field_validator(
         "pension_income",
@@ -36,6 +37,7 @@ class T5Slip(BaseModel):
     capital_gains: Decimal | None = None
     foreign_income: Decimal | None = None
     foreign_tax_withheld: Decimal | None = None
+    document_id: str | None = None
 
     _quantize_optional_fields = field_validator(
         "interest_income",
@@ -53,6 +55,7 @@ class TuitionSlip(BaseModel):
     eligible_tuition: Decimal = Decimal("0.00")
     months_full_time: int = 0
     months_part_time: int = 0
+    document_id: str | None = None
 
 
 class Taxpayer(BaseModel):
@@ -80,6 +83,7 @@ class T4Slip(BaseModel):
     pensionable_earnings: Decimal | None = None
     insurable_earnings: Decimal | None = None
     tax_deducted: Decimal | None = None
+    document_id: str | None = None
 
     _quantize_employment_income = field_validator(
         "employment_income",
@@ -102,6 +106,7 @@ class RRSPReceipt(BaseModel):
     receipt_type: str | None = None
     period_start: date | None = None
     period_end: date | None = None
+    document_id: str | None = None
 
     _quantize_amount = field_validator(
         "contribution_amount",
