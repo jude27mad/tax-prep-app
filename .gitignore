@@ -16,3 +16,9 @@ cert_bundle/
 tests/.tmp_*/
 .hypothesis/
 profiles/
+
+# D1.3 — SQLite dev database + journal files.
+tax_app.db
+tax_app.db-journal
+*.sqlite
+*.sqlite-journal

@@ -26,6 +26,12 @@ pillow>=12.2.0,<13.0
 playwright>=1.47,<2.0
 pytest-playwright>=0.7.2,<1.0
 
+# D1.3: persistent document vault — SQLModel on SQLAlchemy 2.0 async + SQLite.
+sqlmodel>=0.0.24,<1.0
+sqlalchemy>=2.0,<3.0
+aiosqlite>=0.20,<1.0
+alembic>=1.14,<2.0
+
 # Transitive dependencies pinned explicitly to pull in security fixes.
 # urllib3: >=2.6.3 fixes GHSA-gm62 (unbounded link chain), GHSA-2xpw (streaming decompression), GHSA-38jv (decompression-bomb on redirect).
 urllib3>=2.6.3,<3.0
