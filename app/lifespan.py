@@ -30,12 +30,13 @@ def _load_cra_schema_cache(logger: logging.Logger) -> dict[str, str]:
     if _SCHEMA_CACHE is None:
         cache: dict[str, str] = {}
         schema_root = Path(__file__).resolve().parent / "schemas"
-        if schema_root.exists():
+        if schema_root.is_dir():
             for path in schema_root.rglob("*.xsd"):
                 try:
                     cache[path.name] = path.read_text(encoding="utf-8")
                 except OSError as exc:
                     logger.warning("Failed to load CRA schema %s: %s", path, exc)
+            logger.info("CRA XSD cache initialized from %s", schema_root)
         else:
             logger.debug("CRA schema directory %s not found; continuing without cache", schema_root)
         _SCHEMA_CACHE = cache
