@@ -18,8 +18,11 @@ Lookup semantics:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LOCALE = "en"
 SUPPORTED_LOCALES: tuple[str, ...] = ("en", "fr")
@@ -134,6 +137,7 @@ def translate(
         raw = fallback.get(key)
 
     if raw is None:
+        logger.warning("Missing translation for key %r (locale: %r)", key, requested)
         return key
 
     if not params:
