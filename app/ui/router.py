@@ -9,11 +9,20 @@ from typing import Any, cast
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.config import Settings, get_settings
 from app.core.models import ReturnInput
+from app.i18n import (
+    DEFAULT_LOCALE,
+    LOCALE_COOKIE_NAME,
+    SUPPORTED_LOCALES,
+    get_request_locale,
+    is_supported,
+    translate,
+)
 from app.core.validate.pre_submit import validate_return_input
 from app.efile.gating import build_transmit_gate
 from app.efile.t183 import RETENTION_YEARS, build_record, mask_sin, store_signed
@@ -46,6 +55,31 @@ TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
 STATIC_ROOT = UI_ROOT / "static"
 PROFILE_DRAFTS_ROOT = BASE_DIR / "profiles"
 
+
+@pass_context
+def _jinja_t(ctx: Any, key: str, **params: Any) -> str:
+    """Jinja global: ``{{ t("profiles.heading") }}``.
+
+    Reads the locale from ``request.state.locale`` (set by
+    :class:`app.i18n.LocaleMiddleware`). Falls back to
+    :data:`DEFAULT_LOCALE` if no request is in scope (e.g. rendering a
+    macro outside an HTTP context).
+    """
+    request = ctx.get("request")
+    locale = get_request_locale(request) if request is not None else DEFAULT_LOCALE
+    return translate(key, locale, **params)
+
+
+@pass_context
+def _jinja_current_locale(ctx: Any) -> str:
+    request = ctx.get("request")
+    return get_request_locale(request) if request is not None else DEFAULT_LOCALE
+
+
+TEMPLATES.env.globals["t"] = _jinja_t
+TEMPLATES.env.globals["current_locale"] = _jinja_current_locale
+TEMPLATES.env.globals["supported_locales"] = SUPPORTED_LOCALES
+
 # Attach test-hook attributes directly on the router object
 r = cast(Any, router)
 r.BASE_DIR = BASE_DIR
@@ -63,6 +97,25 @@ FORM_STEP_SLUGS = {step["slug"] for step in FORM_STEPS}
 DEFAULT_FORM_STEP = FORM_STEPS[0]["slug"]
 AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
+
+
+@router.post("/locale/{code}", name="ui_set_locale")
+async def set_locale(code: str, request: Request) -> RedirectResponse:
+    """Persist the user's locale choice in the ``locale`` cookie and
+    redirect back to the referring page (or ``/ui/`` if no referer)."""
+    if not is_supported(code):
+        raise HTTPException(status_code=400, detail=f"Unsupported locale: {code!r}")
+    target = request.headers.get("referer") or "/ui/"
+    response = RedirectResponse(url=target, status_code=303)
+    response.set_cookie(
+        key=LOCALE_COOKIE_NAME,
+        value=code.lower(),
+        max_age=60 * 60 * 24 * 365,
+        httponly=False,
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @router.get("/static/{path:path}", name="ui_static")

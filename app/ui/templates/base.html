@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ current_locale() }}">
   <head>
     <meta charset="utf-8" />
-    <title>Tax App UI</title>
+    <title>{{ t("nav.app_title") }}</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -87,11 +87,52 @@
         border: 1px solid #e5e7eb;
         padding: 1rem;
       }
+      header.site {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .locale-switcher {
+        display: inline-flex;
+        gap: 0.4rem;
+        font-size: 0.85rem;
+      }
+      .locale-switcher form {
+        display: inline;
+      }
+      .locale-switcher button {
+        background: transparent;
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        padding: 0.2rem 0.55rem;
+        border-radius: 0.3rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .locale-switcher button[aria-current="true"] {
+        background: white;
+        color: #1e3a8a;
+        font-weight: 600;
+      }
     </style>
     {% block head %}{% endblock %}
   </head>
   <body>
-    <header>Tax App – Guided UI</header>
+    <header class="site">
+      <span>{{ t("nav.app_title") }}</span>
+      <nav class="locale-switcher" aria-label="{{ t('nav.language') }}">
+        {% for code in supported_locales %}
+          <form method="post" action="/ui/locale/{{ code }}">
+            <button type="submit"
+                    aria-current="{{ 'true' if current_locale() == code else 'false' }}"
+                    aria-label="{{ t('nav.language') }}: {{ code | upper }}">
+              {{ code | upper }}
+            </button>
+          </form>
+        {% endfor %}
+      </nav>
+    </header>
     <main>
       {% block content %}{% endblock %}
     </main>

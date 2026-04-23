@@ -49,6 +49,7 @@ from app.wizard import (
 from app.wizard.estimator import compute_tax_summary as _compute_tax_summary
 from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
+from app.i18n import LocaleMiddleware
 from app.core.provinces import (
     DEFAULT_TAX_YEAR,
     list_provincial_calculators as list_provincial_adapters,
@@ -73,6 +74,8 @@ app = FastAPI(
     version="0.0.3",
     lifespan=build_application_lifespan("estimator"),
 )
+
+app.add_middleware(LocaleMiddleware)
 
 app.include_router(ui_router)
 
