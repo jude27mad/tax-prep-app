@@ -55,6 +55,9 @@ const SLIP_STATUS_POLL_INTERVAL = 2500;
 const SLIP_PERSIST_VERSION = 1;
 let lastPersistKey = "";
 
+const liveSlips = slipContainer ? slipContainer.getElementsByClassName("t4-slip") : null;
+const liveRemoveButtons = slipContainer ? slipContainer.getElementsByClassName("remove-slip") : null;
+
 function getGlobalApi() {
   if (typeof window === "undefined") return null;
   if (!window.__returnForm) {
@@ -243,20 +246,19 @@ function addSlip(index = nextSlipIndex++) {
 }
 
 function updateRemoveButtons() {
-  if (!slipContainer) return;
-  const slips = slipContainer.querySelectorAll(".t4-slip");
-  const disable = slips.length === 1;
-  slips.forEach((wrapper) => {
-    const button = wrapper.querySelector(".remove-slip");
-    if (button) {
-      button.disabled = disable;
-    }
+  if (!slipContainer || !liveSlips || !liveRemoveButtons) return;
+  const disable = liveSlips.length === 1;
+  for (let i = 0; i < liveRemoveButtons.length; i++) {
+    liveRemoveButtons[i].disabled = disable;
+  }
+  for (let i = 0; i < liveSlips.length; i++) {
+    const wrapper = liveSlips[i];
     const numberSpan = wrapper.querySelector(".slip-number");
     if (numberSpan) {
       const idx = Number.parseInt(wrapper.dataset.slipIndex || "0", 10);
       numberSpan.textContent = idx + 1;
     }
-  });
+  }
 }
 
 function handleSlipRemove(event) {
@@ -265,7 +267,7 @@ function handleSlipRemove(event) {
   if (!target.classList.contains("remove-slip")) return;
   const wrapper = target.closest(".t4-slip");
   if (!wrapper || !slipContainer) return;
-  if (slipContainer.querySelectorAll(".t4-slip").length === 1) return;
+  if (liveSlips && liveSlips.length === 1) return;
   wrapper.remove();
   updateRemoveButtons();
 }

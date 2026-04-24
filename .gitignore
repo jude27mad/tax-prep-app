@@ -22,4 +22,5 @@ tax_app.db
 tax_app.db-journal
 *.sqlite
 *.sqlite-journal
+node_modules/
 venv/
