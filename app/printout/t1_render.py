@@ -70,24 +70,24 @@ def _format_date(value: date | None) -> str:
     return value.strftime("%Y-%m-%d")
 
 
+_NON_DIGIT_RE = re.compile(r"\D")
+
+
 def _format_sin(value: str | None) -> str:
     if not value:
         return ""
-    digits = "".join(ch for ch in value if ch.isdigit())
+    digits = _NON_DIGIT_RE.sub("", value)
     if len(digits) == 9:
         return f"{digits[:3]} {digits[3:6]} {digits[6:]}"
     return digits
 
 
 def _sum_decimals(values: Iterable[Decimal | None]) -> Decimal:
-    total = Decimal("0.00")
-    for value in values:
-        if value is None:
-            continue
-        if not isinstance(value, Decimal):
-            value = Decimal(str(value))
-        total += value
-    return total
+    return sum(
+        (value if isinstance(value, Decimal) else Decimal(str(value))
+         for value in values if value is not None),
+        start=Decimal("0.00")
+    )
 
 
 def _sanitize_segment(value: str) -> str:
