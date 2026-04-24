@@ -11,6 +11,7 @@ from typing import AsyncContextManager
 import httpx
 from fastapi import FastAPI
 
+from app.auth.email import make_email_backend
 from app.config import get_settings
 from app.db import (
     build_database_url,
@@ -125,6 +126,7 @@ def build_application_lifespan(
         database_url = build_database_url(settings)
         db_engine = create_db_engine(database_url)
         db_session_factory = create_session_factory(db_engine)
+        email_backend = make_email_backend(settings.auth_email_backend)
 
         app.state.settings = settings
         app.state.http_client = http_client
@@ -140,6 +142,8 @@ def build_application_lifespan(
         app.state.db_engine = db_engine
         app.state.db_session_factory = db_session_factory
         app.state.database_url = database_url
+        app.state.email_backend = email_backend
+        app.state.auth_token_ttl_minutes = settings.auth_token_ttl_minutes
 
         logger.info(
             "Startup complete: schemas=%s fonts_registered=%s feature_efile_xml=%s "
@@ -183,6 +187,8 @@ def build_application_lifespan(
                 "db_engine",
                 "db_session_factory",
                 "database_url",
+                "email_backend",
+                "auth_token_ttl_minutes",
             ):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)

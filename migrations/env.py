@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.config import get_settings
 from app.db import Base, build_database_url
-from app.db import models as _models  # noqa: F401  # register tables on Base.metadata
+from app.db import auth as _auth  # noqa: F401  # register users/login_tokens on Base.metadata
+from app.db import models as _models  # noqa: F401  # register documents on Base.metadata
 
 config = context.config
 

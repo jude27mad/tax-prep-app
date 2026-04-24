@@ -66,6 +66,23 @@ class Settings(BaseModel):
     database_url: str | None = Field(default_factory=lambda: os.getenv("DATABASE_URL"))
     db_path: str = Field(default_factory=lambda: os.getenv("DB_PATH", "tax_app.db"))
 
+    # D1.4 — magic-link auth. session_secret is MANDATORY in prod; the
+    # dev default is documented and refuses to sign anything in CERT/PROD
+    # unless overridden. auth_email_backend picks the transport (console
+    # only for Phase 1; smtp/provider adapters land later).
+    session_secret: str = Field(
+        default_factory=lambda: os.getenv(
+            "AUTH_SESSION_SECRET",
+            "dev-only-change-me-do-not-use-in-prod",
+        )
+    )
+    auth_email_backend: str = Field(
+        default_factory=lambda: os.getenv("AUTH_EMAIL_BACKEND", "console")
+    )
+    auth_token_ttl_minutes: int = Field(
+        default_factory=lambda: int(os.getenv("AUTH_TOKEN_TTL_MINUTES", "15"))
+    )
+
     model_config = ConfigDict(frozen=True)
 
     @field_validator("efile_environment", mode="before")
@@ -92,6 +109,13 @@ class Settings(BaseModel):
     @classmethod
     def _validate_threshold(cls, value: int) -> int:
         return max(1, value)
+
+    @field_validator("auth_token_ttl_minutes")
+    @classmethod
+    def _validate_token_ttl(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("AUTH_TOKEN_TTL_MINUTES must be positive")
+        return value
 
     @model_validator(mode="after")
     def _require_endpoints(self) -> "Settings":

@@ -13,6 +13,10 @@ depend on the abstractions re-exported here.
 
 from __future__ import annotations
 
+from app.db.auth import (
+    LoginTokenRow,
+    UserRow,
+)
 from app.db.engine import (
     build_database_url,
     create_engine,
@@ -33,6 +37,8 @@ __all__ = [
     "DocumentRow",
     "DocumentSource",
     "DocumentStatus",
+    "LoginTokenRow",
+    "UserRow",
     "build_database_url",
     "create_engine",
     "create_session_factory",
