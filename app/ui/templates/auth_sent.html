@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card" style="max-width: 480px; margin: 3rem auto; text-align: center;">
+  <h1 style="margin-top: 0;">{{ t("auth.sent.heading") }}</h1>
+  <p>{{ t("auth.sent.body") }}</p>
+  <p style="color: #64748b; font-size: 0.9rem;">
+    {{ t("auth.sent.ttl_hint") }}
+  </p>
+  <p style="margin-top: 1.5rem;">
+    <a href="/auth/login" class="btn secondary">{{ t("auth.sent.back") }}</a>
+  </p>
+</section>
+{% endblock %}

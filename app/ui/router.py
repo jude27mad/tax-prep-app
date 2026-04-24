@@ -6,15 +6,17 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from app.auth import require_user_web
 from app.config import Settings, get_settings
 from app.core.models import ReturnInput
+from app.db import UserRow
 from app.i18n import (
     DEFAULT_LOCALE,
     LOCALE_COOKIE_NAME,
@@ -48,7 +50,16 @@ from app.wizard import (
     slugify,
 )
 
-router = APIRouter(prefix="/ui", tags=["ui"])
+router = APIRouter(
+    prefix="/ui",
+    tags=["ui"],
+    # Every /ui/* route requires an authenticated session. The web-variant
+    # dep 303-redirects to /auth/login?next=... on missing session, so
+    # browsers land on the login page rather than seeing a raw 401 JSON.
+    # Handlers that need user.id still declare their own Depends(require_user_web)
+    # to bind the UserRow as a param — FastAPI caches the dep per request.
+    dependencies=[Depends(require_user_web)],
+)
 
 UI_ROOT = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(UI_ROOT / "templates"))
@@ -76,9 +87,26 @@ def _jinja_current_locale(ctx: Any) -> str:
     return get_request_locale(request) if request is not None else DEFAULT_LOCALE
 
 
+@pass_context
+def _jinja_current_user_email(ctx: Any) -> str | None:
+    """Jinja global: returns the signed-in user's email, or ``None``.
+
+    Reads from ``request.state.current_user`` which is populated by
+    :func:`app.auth.deps.get_current_user` when a session is active.
+    Returns ``None`` for anonymous callers (e.g. the login page itself)
+    so the nav bar can conditionally render the sign-out block.
+    """
+    request = ctx.get("request")
+    if request is None:
+        return None
+    user = getattr(request.state, "current_user", None)
+    return getattr(user, "email", None) if user is not None else None
+
+
 TEMPLATES.env.globals["t"] = _jinja_t
 TEMPLATES.env.globals["current_locale"] = _jinja_current_locale
 TEMPLATES.env.globals["supported_locales"] = SUPPORTED_LOCALES
+TEMPLATES.env.globals["current_user_email"] = _jinja_current_user_email
 
 # Attach test-hook attributes directly on the router object
 r = cast(Any, router)
@@ -288,7 +316,13 @@ def _profile_messages(request: Request) -> list[str]:
     return messages
 
 
-def _profile_context(slug: str, data: dict[str, Any], errors: dict[str, str] | None = None) -> dict[str, Any]:
+def _profile_context(
+    slug: str,
+    data: dict[str, Any],
+    errors: dict[str, str] | None = None,
+    *,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     fields: list[dict[str, Any]] = []
     error_map = errors or {}
     for name in CLI_SAVE_ORDER:
@@ -311,7 +345,7 @@ def _profile_context(slug: str, data: dict[str, Any], errors: dict[str, str] | N
             }
         )
     preview, preview_errors = _build_preview(data)
-    trash_entries = [path for path in list_trash(slug)]
+    trash_entries = [path for path in list_trash(slug, user_id=user_id)]
     trash_entries.sort()
     return {
         "profile_slug": slug,
@@ -388,12 +422,18 @@ def _normalize_step(step: str | None) -> str:
     return DEFAULT_FORM_STEP
 
 
-def _profile_draft_dir(slug: str) -> Path:
+def _profile_draft_dir(slug: str, *, user_id: str | None = None) -> Path:
+    # Autosave drafts piggy-back on the per-user profile directory introduced
+    # in D1.6 so two authenticated users can edit the same slug concurrently
+    # without clobbering each other's in-progress state. ``user_id=None`` keeps
+    # the pre-auth layout for CLI + legacy tests.
+    if user_id:
+        return (PROFILE_DRAFTS_ROOT / "users" / user_id / slug).resolve()
     return (PROFILE_DRAFTS_ROOT / slug).resolve()
 
 
-def _profile_draft_path(slug: str) -> Path:
-    return _profile_draft_dir(slug) / "draft.json"
+def _profile_draft_path(slug: str, *, user_id: str | None = None) -> Path:
+    return _profile_draft_dir(slug, user_id=user_id) / "draft.json"
 
 
 def _coerce_text(value: Any) -> str:
@@ -462,8 +502,12 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
     return state
 
 
-def _load_return_draft(slug: str) -> tuple[dict[str, Any], str | None, str | None, bool]:
-    path = _profile_draft_path(slug)
+def _load_return_draft(
+    slug: str,
+    *,
+    user_id: str | None = None,
+) -> tuple[dict[str, Any], str | None, str | None, bool]:
+    path = _profile_draft_path(slug, user_id=user_id)
     if not path.exists():
         return {}, None, None, False
     try:
@@ -482,15 +526,21 @@ def _load_return_draft(slug: str) -> tuple[dict[str, Any], str | None, str | Non
     return state, normalized_step, timestamp, has_state
 
 
-def _save_return_draft(slug: str, state: dict[str, Any], step: str) -> None:
-    directory = _profile_draft_dir(slug)
+def _save_return_draft(
+    slug: str,
+    state: dict[str, Any],
+    step: str,
+    *,
+    user_id: str | None = None,
+) -> None:
+    directory = _profile_draft_dir(slug, user_id=user_id)
     directory.mkdir(parents=True, exist_ok=True)
     payload = {
         "state": state,
         "step": step,
         "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
-    path = _profile_draft_path(slug)
+    path = _profile_draft_path(slug, user_id=user_id)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -702,8 +752,13 @@ def _hash_metadata_value(raw: str | None) -> str | None:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _collect_t183_records(request: Request, slug: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    state, _, _, has_state = _load_return_draft(slug)
+def _collect_t183_records(
+    request: Request,
+    slug: str,
+    *,
+    user_id: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    state, _, _, has_state = _load_return_draft(slug, user_id=user_id)
     info: dict[str, Any] = {
         "has_state": has_state,
         "masked_sin": None,
@@ -785,9 +840,10 @@ def _t183_consent_context(
     messages: list[str] | None = None,
     errors: dict[str, str] | None = None,
     form_data: dict[str, Any] | None = None,
+    user_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], bool, str]:
     normalized = slugify(slug)
-    state, _, _, has_state = _load_return_draft(normalized)
+    state, _, _, has_state = _load_return_draft(normalized, user_id=user_id)
     if not has_state:
         state = _default_return_form_state()
     taxpayer_state = state.get("taxpayer", {}) if isinstance(state, dict) else {}
@@ -833,11 +889,14 @@ def _relative_artifact_label(path: Path) -> str:
 
 
 @router.get("/", response_class=HTMLResponse)
-def profiles_home(request: Request) -> HTMLResponse:
-    profiles = list_profiles()
-    active = get_active_profile()
+def profiles_home(
+    request: Request,
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
+    profiles = list_profiles(user_id=user.id)
+    active = get_active_profile(user_id=user.id)
     trashed_items: list[dict[str, Any]] = []
-    for path in list_trash():
+    for path in list_trash(user_id=user.id):
         name = path.stem
         if "-" in name:
             slug, timestamp = name.split("-", 1)
@@ -867,45 +926,61 @@ def profiles_home(request: Request) -> HTMLResponse:
 
 
 @router.post("/profiles", response_class=RedirectResponse)
-async def create_profile(request: Request) -> RedirectResponse:
+async def create_profile(
+    request: Request,
+    user: UserRow = Depends(require_user_web),
+) -> RedirectResponse:
     form = await request.form()
     name = _form_text(form.get("name")).strip()
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
     slug = slugify(name)
-    data, _, load_errors = load_profile(slug)
+    data, _, load_errors = load_profile(slug, user_id=user.id)
     if load_errors:
         raise HTTPException(status_code=400, detail="Unable to load existing profile state.")
     if data:
         return RedirectResponse(url=f"/ui/profiles/{slug}", status_code=303)
-    save_profile_data(slug, {})
+    save_profile_data(slug, {}, user_id=user.id)
     return RedirectResponse(url=f"/ui/profiles/{slug}?created=1", status_code=303)
 
 
 @router.post("/profiles/{slug}/set-active", response_class=RedirectResponse)
-def set_active(slug: str) -> RedirectResponse:
-    set_active_profile(slugify(slug))
+def set_active(
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> RedirectResponse:
+    set_active_profile(slugify(slug), user_id=user.id)
     return RedirectResponse(url="/ui/", status_code=303)
 
 
 @router.post("/profiles/{slug}/delete", response_class=RedirectResponse)
-def delete(slug: str) -> RedirectResponse:
-    removed = delete_profile(slugify(slug))
+def delete(
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> RedirectResponse:
+    removed = delete_profile(slugify(slug), user_id=user.id)
     if removed is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     return RedirectResponse(url="/ui/", status_code=303)
 
 
 @router.post("/profiles/{slug}/restore", response_class=RedirectResponse)
-def restore(slug: str) -> RedirectResponse:
-    restored = restore_profile(slugify(slug))
+def restore(
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> RedirectResponse:
+    restored = restore_profile(slugify(slug), user_id=user.id)
     if not restored:
         raise HTTPException(status_code=404, detail="No trashed profile found")
     return RedirectResponse(url=f"/ui/profiles/{slug}?restored=1", status_code=303)
 
 
 @router.post("/profiles/{slug}/rename", response_class=RedirectResponse)
-async def rename(slug: str, request: Request) -> RedirectResponse:
+async def rename(
+    slug: str,
+    request: Request,
+    user: UserRow = Depends(require_user_web),
+) -> RedirectResponse:
     form = await request.form()
     new_name = _form_text(form.get("new_name")).strip()
     old_slug = slugify(slug)
@@ -913,7 +988,7 @@ async def rename(slug: str, request: Request) -> RedirectResponse:
     if not new_slug:
         raise HTTPException(status_code=400, detail="New profile name cannot be empty")
     try:
-        rename_profile(old_slug, new_slug)
+        rename_profile(old_slug, new_slug, user_id=user.id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(url=f"/ui/profiles/{new_slug}?renamed=1", status_code=303)
@@ -929,8 +1004,12 @@ def _validate_record_id(value: str) -> str:
 
 
 @router.get("/profiles/{slug}/t183", response_class=HTMLResponse, name="ui_t183_consent")
-def view_t183_consent(request: Request, slug: str) -> HTMLResponse:
-    context, _, has_state, _ = _t183_consent_context(request, slug)
+def view_t183_consent(
+    request: Request,
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
+    context, _, has_state, _ = _t183_consent_context(request, slug, user_id=user.id)
     if not has_state:
         context.setdefault("messages", []).append(
             "No saved return draft found. The consent page will use blank defaults."
@@ -1026,7 +1105,11 @@ async def _persist_t183_consent(
 
 
 @router.post("/profiles/{slug}/t183", response_class=RedirectResponse)
-async def submit_t183_consent(request: Request, slug: str) -> Response:
+async def submit_t183_consent(
+    request: Request,
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> Response:
     form = await request.form()
     form_data = {key: _form_text(form.get(key)) for key in form.keys()}
     signature = form_data.get("signature", "").strip()
@@ -1037,6 +1120,7 @@ async def submit_t183_consent(request: Request, slug: str) -> Response:
             slug,
             errors={"signature": "Please enter your full name as a signature."},
             form_data=form_data,
+            user_id=user.id,
         )
         return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
     if confirm not in {"on", "true", "1"}:
@@ -1045,9 +1129,12 @@ async def submit_t183_consent(request: Request, slug: str) -> Response:
             slug,
             errors={"confirm": "Please confirm that you authorize transmission."},
             form_data=form_data,
+            user_id=user.id,
         )
         return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
-    context, state, has_state, sin = _t183_consent_context(request, slug, form_data=form_data)
+    context, state, has_state, sin = _t183_consent_context(
+        request, slug, form_data=form_data, user_id=user.id
+    )
     if not has_state:
         state = _default_return_form_state()
     if not sin or len(sin) != 9 or not sin.isdigit():
@@ -1072,7 +1159,7 @@ async def submit_t183_consent(request: Request, slug: str) -> Response:
     t183_state["pdf_path"] = str(summary_path)
     t183_state["record_path"] = str(encrypted_path)
     t183_state["metadata_path"] = str(meta_path)
-    _save_return_draft(slugify(slug), state, "transmit")
+    _save_return_draft(slugify(slug), state, "transmit", user_id=user.id)
     return RedirectResponse(
         url=f"/ui/profiles/{slugify(slug)}?t183_signed=1&record={encrypted_path.stem}",
         status_code=303,
@@ -1084,10 +1171,15 @@ async def submit_t183_consent(request: Request, slug: str) -> Response:
     response_class=FileResponse,
     name="ui_t183_download",
 )
-def download_t183_record(request: Request, slug: str, record_id: str) -> FileResponse:
+def download_t183_record(
+    request: Request,
+    slug: str,
+    record_id: str,
+    user: UserRow = Depends(require_user_web),
+) -> FileResponse:
     normalized = slugify(slug)
     record_key = _validate_record_id(record_id)
-    state, _, _, has_state = _load_return_draft(normalized)
+    state, _, _, has_state = _load_return_draft(normalized, user_id=user.id)
     if not has_state:
         raise HTTPException(status_code=404, detail="No T183 records found for this profile")
     taxpayer_state = state.get("taxpayer", {}) if isinstance(state, dict) else {}
@@ -1120,14 +1212,18 @@ def download_t183_record(request: Request, slug: str, record_id: str) -> FileRes
 
 
 @router.get("/profiles/{slug}", response_class=HTMLResponse)
-def edit_profile(request: Request, slug: str) -> HTMLResponse:
+def edit_profile(
+    request: Request,
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
     normalized = slugify(slug)
-    data, path, load_errors = load_profile(normalized)
+    data, path, load_errors = load_profile(normalized, user_id=user.id)
     errors: dict[str, str] = {}
     messages = _profile_messages(request)
     if load_errors:
         messages.extend(load_errors)
-    context: dict[str, Any] = _profile_context(normalized, data, errors)
+    context: dict[str, Any] = _profile_context(normalized, data, errors, user_id=user.id)
     context.update(
         {
             "request": request,
@@ -1135,28 +1231,36 @@ def edit_profile(request: Request, slug: str) -> HTMLResponse:
         }
     )
     context["retention_years"] = RETENTION_YEARS
-    records, t183_info = _collect_t183_records(request, normalized)
+    records, t183_info = _collect_t183_records(request, normalized, user_id=user.id)
     context["t183_records"] = records
     context["t183_info"] = t183_info
     return TEMPLATES.TemplateResponse("edit.html", context)
 
 
 @router.post("/profiles/{slug}", response_class=HTMLResponse)
-async def save_profile(request: Request, slug: str):
+async def save_profile(
+    request: Request,
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+):
     normalized = slugify(slug)
     form = await request.form()
     form_dict = {key: form.get(key) for key in form.keys()}
     data, field_errors = _extract_form_data(form_dict)
     if field_errors:
-        context: dict[str, Any] = _profile_context(normalized, data, field_errors)
+        context: dict[str, Any] = _profile_context(normalized, data, field_errors, user_id=user.id)
         context.update({"request": request, "messages": ["Please fix the highlighted fields."]})
         return TEMPLATES.TemplateResponse("edit.html", context, status_code=400)
-    save_profile_data(normalized, data)
+    save_profile_data(normalized, data, user_id=user.id)
     return RedirectResponse(url=f"/ui/profiles/{normalized}?saved=1", status_code=303)
 
 
 @router.post("/profiles/{slug}/preview", response_class=HTMLResponse)
-async def preview_profile(request: Request, slug: str) -> HTMLResponse:
+async def preview_profile(
+    request: Request,
+    slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
     form = await request.form()
     form_dict = {key: form.get(key) for key in form.keys()}
     data, errors = _extract_form_data(form_dict)
@@ -1173,15 +1277,22 @@ async def preview_profile(request: Request, slug: str) -> HTMLResponse:
     return TEMPLATES.TemplateResponse("preview.html", context)
 
 
-def _render_return_form(request: Request, step: str | None) -> HTMLResponse:
+def _render_return_form(
+    request: Request,
+    step: str | None,
+    *,
+    user_id: str | None = None,
+) -> HTMLResponse:
     settings = _resolve_settings(request)
     form_state = _default_return_form_state()
     current_step = _normalize_step(step)
     messages: list[str] = []
-    autosave_profile = get_active_profile()
+    autosave_profile = get_active_profile(user_id=user_id)
     autosave_url = ""
     if autosave_profile:
-        saved_state, saved_step, saved_timestamp, has_state = _load_return_draft(autosave_profile)
+        saved_state, saved_step, saved_timestamp, has_state = _load_return_draft(
+            autosave_profile, user_id=user_id
+        )
         if has_state:
             form_state = saved_state
         if saved_step:
@@ -1212,17 +1323,28 @@ def _render_return_form(request: Request, step: str | None) -> HTMLResponse:
 
 
 @router.get("/returns/new", response_class=HTMLResponse)
-def new_return(request: Request, step: str | None = Query(None)) -> HTMLResponse:
-    return _render_return_form(request, step)
+def new_return(
+    request: Request,
+    step: str | None = Query(None),
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
+    return _render_return_form(request, step, user_id=user.id)
 
 
 @router.get("/returns/new/{step_slug}", response_class=HTMLResponse)
-def new_return_step(request: Request, step_slug: str) -> HTMLResponse:
-    return _render_return_form(request, step_slug)
+def new_return_step(
+    request: Request,
+    step_slug: str,
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
+    return _render_return_form(request, step_slug, user_id=user.id)
 
 
 @router.post("/returns/prepare", response_class=HTMLResponse)
-async def prepare_return(request: Request) -> HTMLResponse:
+async def prepare_return(
+    request: Request,
+    user: UserRow = Depends(require_user_web),
+) -> HTMLResponse:
     form = await request.form()
     form_dict = {key: form.get(key) for key in form.keys()}
     payload, field_errors, state = _parse_return_form(form_dict)
@@ -1246,7 +1368,7 @@ async def prepare_return(request: Request) -> HTMLResponse:
             calc_json = json.dumps(calc_dump, indent=2)
 
     settings = _resolve_settings(request)
-    autosave_profile = get_active_profile()
+    autosave_profile = get_active_profile(user_id=user.id)
     autosave_url = str(request.url_for("ui_autosave_return")) if autosave_profile else ""
 
     messages: list[str] = []
@@ -1275,14 +1397,18 @@ async def prepare_return(request: Request) -> HTMLResponse:
 
 
 @router.post("/returns/autosave", response_class=JSONResponse, name="ui_autosave_return")
-async def autosave_return(request: Request, payload: ReturnAutosavePayload) -> JSONResponse:
-    active_profile = get_active_profile()
+async def autosave_return(
+    request: Request,
+    payload: ReturnAutosavePayload,
+    user: UserRow = Depends(require_user_web),
+) -> JSONResponse:
+    active_profile = get_active_profile(user_id=user.id)
     if not active_profile:
         raise HTTPException(status_code=400, detail="No active profile selected for autosave")
     if payload.profile != active_profile:
         raise HTTPException(status_code=400, detail="Autosave profile mismatch")
     sanitized_state = _merge_return_form_state(_default_return_form_state(), payload.state)
-    _save_return_draft(payload.profile, sanitized_state, payload.step)
+    _save_return_draft(payload.profile, sanitized_state, payload.step, user_id=user.id)
     return JSONResponse({"saved": True, "step": payload.step})
 
 
@@ -1292,21 +1418,30 @@ async def upload_slip(
     profile: str,
     year: int,
     upload: UploadFile = File(...),
+    user: UserRow = Depends(require_user_web),
 ) -> JSONResponse:
     settings = _resolve_settings(request)
     store = await slip_ingest.resolve_store(request.app)
     try:
-        status = await store.process_upload(profile, year, upload, settings=settings)
+        status = await store.process_upload(
+            profile, year, upload, settings=settings, user_id=user.id
+        )
     except slip_ingest.SlipUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(status.model_dump(mode="json"))
 
 
 @router.get("/returns/{profile}/{year}/slips/status", response_class=JSONResponse)
-async def slip_status(request: Request, profile: str, year: int, job_id: str) -> JSONResponse:
+async def slip_status(
+    request: Request,
+    profile: str,
+    year: int,
+    job_id: str,
+    user: UserRow = Depends(require_user_web),
+) -> JSONResponse:
     store = await slip_ingest.resolve_store(request.app)
     try:
-        status = await store.job_status(profile, year, job_id)
+        status = await store.job_status(profile, year, job_id, user_id=user.id)
     except slip_ingest.SlipJobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JSONResponse(status.model_dump(mode="json"))
@@ -1318,10 +1453,13 @@ async def apply_slip_detections(
     profile: str,
     year: int,
     payload: slip_ingest.ApplyDetectionsRequest,
+    user: UserRow = Depends(require_user_web),
 ) -> JSONResponse:
     store = await slip_ingest.resolve_store(request.app)
     try:
-        detections = await store.apply(profile, year, payload.detection_ids)
+        detections = await store.apply(
+            profile, year, payload.detection_ids, user_id=user.id
+        )
     except slip_ingest.SlipApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(
@@ -1330,9 +1468,14 @@ async def apply_slip_detections(
 
 
 @router.post("/returns/{profile}/{year}/slips/clear", response_class=JSONResponse)
-async def clear_slip_detections(request: Request, profile: str, year: int) -> JSONResponse:
+async def clear_slip_detections(
+    request: Request,
+    profile: str,
+    year: int,
+    user: UserRow = Depends(require_user_web),
+) -> JSONResponse:
     store = await slip_ingest.resolve_store(request.app)
-    await store.clear(profile, year)
+    await store.clear(profile, year, user_id=user.id)
     return JSONResponse({"cleared": True})
 
 

@@ -310,8 +310,17 @@ def test_resolve_locale_prefers_query_then_cookie_then_header():
 @pytest.fixture
 def ui_client(tmp_path, monkeypatch):
     """Isolated TestClient against the real FastAPI app with a scratch
-    profile root so we don't touch the developer's ``profiles/`` folder."""
+    profile root so we don't touch the developer's ``profiles/`` folder.
+
+    Since D1.6 every /ui/* route is gated behind ``require_user_web``, we
+    install a dependency override that pretends a test user is signed in
+    so locale-rendering assertions aren't shadowed by a 303-redirect
+    to /auth/login.
+    """
+    from dataclasses import dataclass
+
     from app import main as main_module
+    from app.auth.deps import require_user_web
     from app.ui import router as ui_router_module
     from app.wizard import profiles as profile_store
 
@@ -322,7 +331,16 @@ def ui_client(tmp_path, monkeypatch):
     )
     (tmp_path / "profiles").mkdir(exist_ok=True)
 
-    return TestClient(main_module.app)
+    @dataclass
+    class _I18nFakeUser:
+        id: str = "11111111-1111-1111-1111-111111111111"
+        email: str = "tester@example.com"
+
+    main_module.app.dependency_overrides[require_user_web] = lambda: _I18nFakeUser()
+    try:
+        yield TestClient(main_module.app)
+    finally:
+        main_module.app.dependency_overrides.pop(require_user_web, None)
 
 
 def test_ui_home_renders_english_by_default(ui_client):

@@ -78,6 +78,19 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
 
     monkeypatch.setattr(api_http.EfileClient, "send", fake_send)
 
+    # D1.6 gates /ui/artifacts/* behind require_user_web. This flow cares
+    # about artifact retrieval, not the login path, so substitute a fake
+    # signed-in user. ``monkeypatch.setitem`` auto-reverts at teardown so
+    # the override doesn't leak to later tests sharing ``api_app``.
+    from app.auth.deps import require_user_web
+    from types import SimpleNamespace as _NS
+
+    monkeypatch.setitem(
+        api_app.dependency_overrides,
+        require_user_web,
+        lambda: _NS(id="11111111-1111-1111-1111-111111111111", email="tester@example.com"),
+    )
+
     client = TestClient(api_app)
 
     payload = make_min_input(tax_year=2024).model_dump(mode="json")

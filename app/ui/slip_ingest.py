@@ -146,6 +146,7 @@ class SlipStagingStore:
         upload: UploadFile,
         *,
         settings: Settings,
+        user_id: str | None = None,
     ) -> SlipJobStatus:
         safe_profile = slugify(profile) or "default"
         filename = upload.filename or ""
@@ -155,6 +156,7 @@ class SlipStagingStore:
             session.add(
                 DocumentRow(
                     id=doc_id,
+                    user_id=user_id,
                     profile_slug=safe_profile,
                     tax_year=int(year),
                     source_type=DocumentSource.UPLOAD.value,
@@ -206,7 +208,14 @@ class SlipStagingStore:
             row.raw_fields = dict(detection.fields)
             row.warnings = list(detection.warnings)
 
-    async def job_status(self, profile: str, year: int, job_id: str) -> SlipJobStatus:
+    async def job_status(
+        self,
+        profile: str,
+        year: int,
+        job_id: str,
+        *,
+        user_id: str | None = None,
+    ) -> SlipJobStatus:
         safe_profile = slugify(profile) or "default"
         async with session_scope(self._factory) as session:
             row = await session.get(DocumentRow, job_id)
@@ -214,7 +223,12 @@ class SlipStagingStore:
                 row is None
                 or row.profile_slug != safe_profile
                 or row.tax_year != int(year)
+                or row.user_id != user_id
             ):
+                # Tenant isolation: a caller with user_id=A must not even learn
+                # that user_id=B's job ID exists, so we return the same 404 as
+                # a truly missing row. Callers with user_id=None only see
+                # legacy (pre-D1.6) unowned rows.
                 raise SlipJobNotFoundError("Upload job not found")
             return _status_from_row(row)
 
@@ -223,11 +237,14 @@ class SlipStagingStore:
         profile: str,
         year: int,
         detection_ids: Iterable[str] | None = None,
+        *,
+        user_id: str | None = None,
     ) -> list[SlipDetection]:
         safe_profile = slugify(profile) or "default"
         async with session_scope(self._factory) as session:
             stmt = (
                 select(DocumentRow)
+                .where(DocumentRow.user_id == user_id)
                 .where(DocumentRow.profile_slug == safe_profile)
                 .where(DocumentRow.tax_year == int(year))
                 .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
@@ -256,11 +273,18 @@ class SlipStagingStore:
 
             return applied
 
-    async def clear(self, profile: str, year: int) -> None:
+    async def clear(
+        self,
+        profile: str,
+        year: int,
+        *,
+        user_id: str | None = None,
+    ) -> None:
         safe_profile = slugify(profile) or "default"
         async with session_scope(self._factory) as session:
             stmt = (
                 select(DocumentRow)
+                .where(DocumentRow.user_id == user_id)
                 .where(DocumentRow.profile_slug == safe_profile)
                 .where(DocumentRow.tax_year == int(year))
                 .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
@@ -583,6 +607,7 @@ async def ingest_slip_uploads(
     *,
     settings: Settings | None = None,
     app: Any | None = None,
+    user_id: str | None = None,
 ) -> tuple[list[SlipDetection], list[str]]:
     year_val = year if year is not None else datetime.now(timezone.utc).year
     cfg = settings or Settings()
@@ -613,7 +638,13 @@ async def ingest_slip_uploads(
                 pass
             continue
         try:
-            status = await store.process_upload(profile, int(year_val), upload, settings=cfg)
+            status = await store.process_upload(
+                profile,
+                int(year_val),
+                upload,
+                settings=cfg,
+                user_id=user_id,
+            )
             if status.status == "complete" and status.detection is not None:
                 detections.append(status.detection)
         except Exception:
@@ -627,9 +658,10 @@ async def slip_job_status(
     job_id: str,
     *,
     app: Any | None = None,
+    user_id: str | None = None,
 ) -> SlipJobStatus:
     store = await resolve_store(app)
-    return await store.job_status(profile, year, job_id)
+    return await store.job_status(profile, year, job_id, user_id=user_id)
 
 
 async def apply_staged_detections(
@@ -638,6 +670,7 @@ async def apply_staged_detections(
     detection_ids: Iterable[str] | None = None,
     *,
     app: Any | None = None,
+    user_id: str | None = None,
 ) -> list[SlipDetection]:
     store = await resolve_store(app)
-    return await store.apply(profile, year, detection_ids)
+    return await store.apply(profile, year, detection_ids, user_id=user_id)

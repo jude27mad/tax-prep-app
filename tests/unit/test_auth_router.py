@@ -154,3 +154,133 @@ def test_me_returns_401_without_session(
     c, _ = client
     resp = c.get("/auth/me")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# D1.6 — HTML login flow
+# ---------------------------------------------------------------------------
+
+
+def test_login_page_renders_form(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    c, _ = client
+    resp = c.get("/auth/login")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    body = resp.text
+    assert 'name="email"' in body
+    assert 'action="/auth/request"' in body
+
+
+def test_login_page_preserves_next_param(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    """The hidden ``next`` input must round-trip through the form."""
+    c, _ = client
+    resp = c.get("/auth/login?next=/ui/profiles")
+    assert resp.status_code == 200
+    # Rendered form must carry the next path as a hidden field.
+    assert 'name="next"' in resp.text
+    assert "/ui/profiles" in resp.text
+
+
+def test_login_page_rejects_unsafe_next(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    """Absolute URLs and protocol-relative paths must be neutralized."""
+    c, _ = client
+    # Open-redirect attempt should collapse to "/" — we never echo the bad value.
+    resp = c.get("/auth/login?next=//evil.example/hax")
+    assert resp.status_code == 200
+    assert "evil.example" not in resp.text
+
+
+def test_form_post_request_redirects_to_sent(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    """Browser form POSTs get a 303 to /auth/sent; API callers still get 204."""
+    c, backend = client
+    resp = c.post(
+        "/auth/request",
+        data={"email": "eve@example.com", "next": "/ui/profiles"},
+        headers={"accept": "text/html"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/auth/sent"
+    assert len(backend.sent) == 1
+    # Next path must be baked into the magic link so verify can redirect back.
+    assert "next=%2Fui%2Fprofiles" in backend.sent[0].link or "next=/ui/profiles" in backend.sent[0].link
+
+
+def test_form_post_request_renders_error_on_bad_email(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    c, _ = client
+    resp = c.post(
+        "/auth/request",
+        data={"email": "not-an-email"},
+        headers={"accept": "text/html"},
+    )
+    assert resp.status_code == 400
+    assert 'name="email"' in resp.text  # form is re-rendered
+    assert "not-an-email" in resp.text  # value is preserved
+
+
+def test_sent_page_renders(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    c, _ = client
+    resp = c.get("/auth/sent")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_verify_redirects_to_next_when_provided(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    c, backend = client
+    c.post(
+        "/auth/request",
+        data={"email": "frank@example.com", "next": "/ui/profiles"},
+        headers={"accept": "text/html"},
+        follow_redirects=False,
+    )
+    # The emailed link now carries ?next=/ui/profiles
+    link = backend.sent[0].link
+    assert "next=" in link
+    # Follow the verify step manually so we can inspect the Location header.
+    resp = c.get(link.replace("http://testserver", ""), follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/ui/profiles"
+
+
+def test_verify_drops_unsafe_next(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    """Even if an attacker crafts a verify URL with an open-redirect next,
+    the server must collapse it to ``/`` before redirecting."""
+    c, backend = client
+    c.post("/auth/request", data={"email": "grace@example.com"})
+    token = backend.sent[0].link.split("token=", 1)[1]
+    resp = c.get(
+        f"/auth/verify?token={token}&next=https://evil.example/",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/"
+
+
+def test_form_post_logout_redirects_to_login(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    c, backend = client
+    c.post("/auth/request", data={"email": "henri@example.com"})
+    token = backend.sent[0].link.split("token=", 1)[1]
+    c.get(f"/auth/verify?token={token}", follow_redirects=False)
+
+    resp = c.post("/auth/logout", headers={"accept": "text/html"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/auth/login"
+    assert c.get("/auth/me").status_code == 401

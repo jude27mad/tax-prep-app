@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card" style="max-width: 420px; margin: 3rem auto;">
+  <h1 style="margin-top: 0;">{{ t("auth.login.heading") }}</h1>
+  <p>{{ t("auth.login.intro") }}</p>
+
+  {% if error %}
+    <ul class="messages" role="alert">
+      <li style="background: #fef2f2; border-color: #fecaca; color: #b91c1c;">
+        {{ error }}
+      </li>
+    </ul>
+  {% endif %}
+
+  <form method="post" action="/auth/request">
+    {% if next_path %}<input type="hidden" name="next" value="{{ next_path }}" />{% endif %}
+    <label for="email" style="display: block; margin-bottom: 0.25rem;">
+      {{ t("auth.login.email_label") }}
+    </label>
+    <input
+      type="email"
+      id="email"
+      name="email"
+      required
+      autocomplete="email"
+      autofocus
+      value="{{ email_value or '' }}"
+      style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 0.4rem; box-sizing: border-box;"
+    />
+    <button
+      type="submit"
+      class="btn"
+      style="margin-top: 1rem; width: 100%; justify-content: center; background: #1e3a8a; color: white;"
+    >
+      {{ t("auth.login.submit") }}
+    </button>
+  </form>
+
+  <p style="margin-top: 1.5rem; font-size: 0.9rem; color: #64748b;">
+    {{ t("auth.login.hint") }}
+  </p>
+</section>
+{% endblock %}

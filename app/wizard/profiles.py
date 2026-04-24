@@ -1,3 +1,17 @@
+"""Profile filesystem store (TOML drafts + trash + history + active pointer).
+
+User scoping (D1.6): every public function accepts an optional ``user_id``.
+When provided, the profile lives under ``profiles/<user_id>/<slug>.toml``
+and the active-profile pointer + trash + history are all scoped under the
+same ``profiles/<user_id>/`` directory. When ``user_id`` is ``None`` the
+functions behave like the pre-D1.6 global namespace (``profiles/<slug>.toml``),
+which is the mode used by the CLI and by pre-auth tests.
+
+Router handlers gated by ``require_user_web`` always pass ``user_id=user.id``,
+so an authenticated request cannot see another user's drafts even if they
+guess the slug.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -34,24 +48,46 @@ def slugify(value: str) -> str:
     return cleaned or "profile"
 
 
-def _ensure_profiles_dirs() -> None:
-    for directory in (PROFILES_DIR, PROFILE_HISTORY_DIR, PROFILE_TRASH_DIR):
+def _user_root(user_id: str | None) -> Path:
+    # Per-user scoping carves out ``profiles/<user_id>/`` so two authenticated
+    # users cannot see each other's drafts even if they guess a slug. The
+    # ``None`` branch keeps the pre-D1.6 global layout for CLI + legacy tests.
+    if user_id:
+        return PROFILES_DIR / "users" / user_id
+    return PROFILES_DIR
+
+
+def _ensure_profiles_dirs(user_id: str | None = None) -> None:
+    root = _user_root(user_id)
+    for directory in (root, root / "history", root / ".trash"):
         directory.mkdir(parents=True, exist_ok=True)
 
 
-def _profile_path(slug: str) -> Path:
-    return PROFILES_DIR / f"{slug}.toml"
+def _profile_path(slug: str, user_id: str | None = None) -> Path:
+    return _user_root(user_id) / f"{slug}.toml"
 
 
-def _history_dir(slug: str) -> Path:
-    return PROFILE_HISTORY_DIR / slug
+def _history_dir(slug: str, user_id: str | None = None) -> Path:
+    return _user_root(user_id) / "history" / slug
 
 
-def load_profile(slug: str | None) -> tuple[dict[str, Any], Path | None, list[str]]:
+def _trash_dir(user_id: str | None = None) -> Path:
+    return _user_root(user_id) / ".trash"
+
+
+def _active_pointer(user_id: str | None = None) -> Path:
+    return _user_root(user_id) / "active_profile.txt"
+
+
+def load_profile(
+    slug: str | None,
+    *,
+    user_id: str | None = None,
+) -> tuple[dict[str, Any], Path | None, list[str]]:
     if not slug:
         return {}, None, []
-    _ensure_profiles_dirs()
-    path = _profile_path(slug)
+    _ensure_profiles_dirs(user_id)
+    path = _profile_path(slug, user_id)
     if not path.exists():
         return {}, None, []
     errors: list[str] = []
@@ -69,55 +105,66 @@ def load_profile(slug: str | None) -> tuple[dict[str, Any], Path | None, list[st
     return data, path, errors
 
 
-def _snapshot_profile(slug: str, path: Path) -> None:
+def _snapshot_profile(slug: str, path: Path, user_id: str | None = None) -> None:
     if not path.exists():
         return
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    history_dir = _history_dir(slug)
+    history_dir = _history_dir(slug, user_id)
     history_dir.mkdir(parents=True, exist_ok=True)
     snapshot = history_dir / f"{timestamp}.toml"
     snapshot.write_bytes(path.read_bytes())
 
 
-def _trash_profile(slug: str, path: Path) -> Path | None:
+def _trash_profile(slug: str, path: Path, user_id: str | None = None) -> Path | None:
     if not path.exists():
         return None
-    _ensure_profiles_dirs()
-    PROFILE_TRASH_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_profiles_dirs(user_id)
+    trash = _trash_dir(user_id)
+    trash.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    dest = PROFILE_TRASH_DIR / f"{slug}-{timestamp}.toml"
+    dest = trash / f"{slug}-{timestamp}.toml"
     path.replace(dest)
     return dest
 
 
-def list_profiles() -> list[str]:
-    if not PROFILES_DIR.exists():
+def list_profiles(*, user_id: str | None = None) -> list[str]:
+    root = _user_root(user_id)
+    if not root.exists():
         return []
-    return sorted(p.stem for p in PROFILES_DIR.glob("*.toml") if p.is_file())
+    # Only direct *.toml children, not the active_profile.txt pointer or
+    # anything nested under history/.trash.
+    return sorted(p.stem for p in root.glob("*.toml") if p.is_file())
 
 
-def list_trash(slug: str | None = None) -> list[Path]:
-    if not PROFILE_TRASH_DIR.exists():
+def list_trash(
+    slug: str | None = None,
+    *,
+    user_id: str | None = None,
+) -> list[Path]:
+    trash = _trash_dir(user_id)
+    if not trash.exists():
         return []
-    files = [p for p in PROFILE_TRASH_DIR.glob("*.toml") if p.is_file()]
+    files = [p for p in trash.glob("*.toml") if p.is_file()]
     if slug:
         prefix = f"{slug}-"
         files = [p for p in files if p.name.startswith(prefix)]
     return sorted(files)
 
 
-def set_active_profile(slug: str | None) -> None:
-    _ensure_profiles_dirs()
+def set_active_profile(slug: str | None, *, user_id: str | None = None) -> None:
+    _ensure_profiles_dirs(user_id)
+    pointer = _active_pointer(user_id)
     if slug is None:
-        if DEFAULT_PROFILE_FILE.exists():
-            DEFAULT_PROFILE_FILE.unlink()
+        if pointer.exists():
+            pointer.unlink()
         return
-    DEFAULT_PROFILE_FILE.write_text(slug + "\n", encoding="utf-8")
+    pointer.write_text(slug + "\n", encoding="utf-8")
 
 
-def get_active_profile() -> str | None:
-    if DEFAULT_PROFILE_FILE.exists():
-        content = DEFAULT_PROFILE_FILE.read_text(encoding="utf-8").strip()
+def get_active_profile(*, user_id: str | None = None) -> str | None:
+    pointer = _active_pointer(user_id)
+    if pointer.exists():
+        content = pointer.read_text(encoding="utf-8").strip()
         return content or None
     return None
 
@@ -140,52 +187,62 @@ def save_user_data(data: dict[str, Any], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def save_profile_data(slug: str, data: dict[str, Any]) -> Path:
-    _ensure_profiles_dirs()
-    path = _profile_path(slug)
+def save_profile_data(
+    slug: str,
+    data: dict[str, Any],
+    *,
+    user_id: str | None = None,
+) -> Path:
+    _ensure_profiles_dirs(user_id)
+    path = _profile_path(slug, user_id)
     if path.exists():
-        _snapshot_profile(slug, path)
+        _snapshot_profile(slug, path, user_id)
     save_user_data(data, path)
-    set_active_profile(slug)
+    set_active_profile(slug, user_id=user_id)
     return path
 
 
-def delete_profile(slug: str) -> Path | None:
-    path = _profile_path(slug)
+def delete_profile(slug: str, *, user_id: str | None = None) -> Path | None:
+    path = _profile_path(slug, user_id)
     if not path.exists():
         return None
-    trashed = _trash_profile(slug, path)
-    if get_active_profile() == slug:
-        set_active_profile(None)
+    trashed = _trash_profile(slug, path, user_id)
+    if get_active_profile(user_id=user_id) == slug:
+        set_active_profile(None, user_id=user_id)
     return trashed
 
 
-def restore_profile(slug: str) -> Path | None:
-    candidates = list_trash(slug)
+def restore_profile(slug: str, *, user_id: str | None = None) -> Path | None:
+    candidates = list_trash(slug, user_id=user_id)
     if not candidates:
         return None
     candidate = candidates[-1]
-    dest = _profile_path(slug)
+    dest = _profile_path(slug, user_id)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(candidate.read_bytes())
     candidate.unlink()
     return dest
 
 
-def rename_profile(slug: str, new_slug: str) -> tuple[Path | None, Path | None]:
+def rename_profile(
+    slug: str,
+    new_slug: str,
+    *,
+    user_id: str | None = None,
+) -> tuple[Path | None, Path | None]:
     if slug == new_slug:
-        return _profile_path(slug), None
-    old_path = _profile_path(slug)
+        return _profile_path(slug, user_id), None
+    old_path = _profile_path(slug, user_id)
     if not old_path.exists():
         return None, None
-    new_path = _profile_path(new_slug)
+    new_path = _profile_path(new_slug, user_id)
     if new_path.exists():
         raise ValueError(f"Profile '{new_slug}' already exists.")
     new_path.parent.mkdir(parents=True, exist_ok=True)
     new_path.write_bytes(old_path.read_bytes())
     old_path.unlink()
-    old_history = _history_dir(slug)
-    new_history = _history_dir(new_slug)
+    old_history = _history_dir(slug, user_id)
+    new_history = _history_dir(new_slug, user_id)
     if old_history.exists():
         new_history.parent.mkdir(parents=True, exist_ok=True)
         if new_history.exists():
@@ -196,8 +253,8 @@ def rename_profile(slug: str, new_slug: str) -> tuple[Path | None, Path | None]:
             old_history.rmdir()
         else:
             old_history.rename(new_history)
-    if get_active_profile() == slug:
-        set_active_profile(new_slug)
+    if get_active_profile(user_id=user_id) == slug:
+        set_active_profile(new_slug, user_id=user_id)
     return new_path, new_history
 
 

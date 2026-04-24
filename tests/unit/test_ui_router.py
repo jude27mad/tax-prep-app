@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import import_module
 import json
 from typing import cast
@@ -8,12 +9,28 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import app.wizard as wizard
 import app.wizard.profiles as profiles
+from app.auth.deps import require_user_web
 from app.config import get_settings
 from app.efile import crypto
 
 ui_router_module = import_module("app.ui.router")
 
 TEST_KEY = "jLNo6J1iO5Y5P2bIC2T5T8DKS-p91Z9a7qV3-0iKqa4="
+TEST_USER_ID = "11111111-1111-1111-1111-111111111111"
+TEST_USER_EMAIL = "tester@example.com"
+
+
+@dataclass
+class _FakeUser:
+    """Minimal stand-in for :class:`app.db.UserRow` in router tests.
+
+    We only need ``.id`` (profile filesystem scoping + DB row stamping)
+    and ``.email`` (nav bar rendering). A full UserRow would require a
+    live DB + migrations which every test would then have to bootstrap.
+    """
+
+    id: str = TEST_USER_ID
+    email: str = TEST_USER_EMAIL
 
 
 def _configure_profiles_dirs(monkeypatch, tmp_path):
@@ -42,8 +59,22 @@ def _configure_crypto(monkeypatch):
     crypto._cipher.cache_clear()
 
 
-def _build_client():
+def _build_client(*, authenticate: bool = True) -> TestClient:
     app = FastAPI()
+
+    if authenticate:
+        # Stash a ``_FakeUser`` on request.state via a middleware *before*
+        # dep resolution so the base template's ``current_user_email()``
+        # Jinja global finds it. The dep override then returns the same
+        # fake for handlers that bind ``Depends(require_user_web)`` as a
+        # param.
+        @app.middleware("http")
+        async def _stash_fake_user(request, call_next):  # type: ignore[no-untyped-def]
+            request.state.current_user = _FakeUser()
+            return await call_next(request)
+
+        app.dependency_overrides[require_user_web] = lambda: _FakeUser()
+
     app.include_router(ui_router_module.router)
     return TestClient(app)
 
@@ -52,18 +83,18 @@ def _client_app(client: TestClient) -> FastAPI:
     return cast(FastAPI, client.app)
 
 
-def _seed_return_draft(slug: str, tax_year: int = 2025) -> None:
+def _seed_return_draft(slug: str, tax_year: int = 2025, *, user_id: str | None = TEST_USER_ID) -> None:
     state = ui_router_module._default_return_form_state()
     state["taxpayer"]["sin"] = "046454286"
     state["taxpayer"]["first_name"] = "Test"
     state["taxpayer"]["last_name"] = "User"
     state["tax_year"] = str(tax_year)
-    ui_router_module._save_return_draft(slug, state, "transmit")
+    ui_router_module._save_return_draft(slug, state, "transmit", user_id=user_id)
 
 
 def test_profiles_home_lists_profiles(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
-    profiles.save_profile_data("alice", {})
+    profiles.save_profile_data("alice", {}, user_id=TEST_USER_ID)
 
     client = _build_client()
     response = client.get("/ui/")
@@ -86,7 +117,7 @@ def test_create_profile_accepts_multipart(tmp_path, monkeypatch):
     assert response.status_code == 303
     assert response.headers["location"].endswith("/ui/profiles/test-user?created=1")
     assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
-    assert (base / "profiles" / "test-user.toml").exists()
+    assert (base / "profiles" / "users" / TEST_USER_ID / "test-user.toml").exists()
 
 
 def test_preview_displays_summary(tmp_path, monkeypatch):
@@ -149,7 +180,7 @@ def test_new_return_form_renders(monkeypatch, tmp_path):
 
 def test_save_profile_accepts_multipart(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
-    profiles.save_profile_data("tester", {})
+    profiles.save_profile_data("tester", {}, user_id=TEST_USER_ID)
 
     client = _build_client()
     response = client.post(
@@ -162,7 +193,7 @@ def test_save_profile_accepts_multipart(tmp_path, monkeypatch):
     assert response.status_code == 303
     assert response.headers["location"].endswith("/ui/profiles/tester?saved=1")
     assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
-    saved_data, _, _ = profiles.load_profile("tester")
+    saved_data, _, _ = profiles.load_profile("tester", user_id=TEST_USER_ID)
     assert saved_data.get("box14") == 55000
 
 
@@ -208,7 +239,7 @@ def test_prepare_return_handles_valid_form(monkeypatch, tmp_path):
 def test_t183_consent_page_includes_masked_sin(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
     _configure_crypto(monkeypatch)
-    profiles.save_profile_data("tester", {})
+    profiles.save_profile_data("tester", {}, user_id=TEST_USER_ID)
     _seed_return_draft("tester")
 
     client = _build_client()
@@ -225,7 +256,7 @@ def test_t183_consent_page_includes_masked_sin(tmp_path, monkeypatch):
 def test_t183_consent_submission_stores_record(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
     _configure_crypto(monkeypatch)
-    profiles.save_profile_data("tester", {})
+    profiles.save_profile_data("tester", {}, user_id=TEST_USER_ID)
     _seed_return_draft("tester")
 
     client = _build_client()
@@ -253,7 +284,7 @@ def test_t183_consent_submission_stores_record(tmp_path, monkeypatch):
     assert metadata["masked_sin"] == "***-***-4286"
     assert metadata["encrypted_path"].endswith(encrypted_files[0].name)
 
-    state, _, _, has_state = ui_router_module._load_return_draft("tester")
+    state, _, _, has_state = ui_router_module._load_return_draft("tester", user_id=TEST_USER_ID)
     assert has_state
     assert state["t183"]["record_path"].endswith(encrypted_files[0].name)
     assert state["t183"]["metadata_path"].endswith(metadata_files[0].name)
@@ -269,7 +300,7 @@ def test_t183_consent_submission_stores_record(tmp_path, monkeypatch):
 def test_profile_page_lists_t183_records(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
     _configure_crypto(monkeypatch)
-    profiles.save_profile_data("tester", {})
+    profiles.save_profile_data("tester", {}, user_id=TEST_USER_ID)
     _seed_return_draft("tester")
 
     client = _build_client()
@@ -289,3 +320,75 @@ def test_profile_page_lists_t183_records(tmp_path, monkeypatch):
     body = response.text
     assert "T183 authorizations" in body
     assert "Encrypted blob" in body
+
+
+# ---------------------------------------------------------------------------
+# D1.6 — auth gating + tenant isolation
+# ---------------------------------------------------------------------------
+
+
+def test_ui_home_redirects_unauth_to_login(tmp_path, monkeypatch):
+    """Unauthenticated /ui/ must 303 to /auth/login so browsers don't see a
+    raw 401 JSON blob. The redirect preserves ``?next=`` for round-trip."""
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    client = _build_client(authenticate=False)
+    response = client.get("/ui/", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/auth/login?next=")
+
+
+def test_ui_profile_edit_redirects_unauth_to_login(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    client = _build_client(authenticate=False)
+    response = client.get("/ui/profiles/someone", follow_redirects=False)
+    assert response.status_code == 303
+    assert "/auth/login" in response.headers["location"]
+    assert "next=" in response.headers["location"]
+
+
+def test_profiles_home_is_user_scoped(tmp_path, monkeypatch):
+    """Another user's profile must not appear in the authenticated user's list."""
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    profiles.save_profile_data("mine", {}, user_id=TEST_USER_ID)
+    profiles.save_profile_data("theirs", {}, user_id="22222222-2222-2222-2222-222222222222")
+
+    client = _build_client()
+    response = client.get("/ui/")
+
+    assert response.status_code == 200
+    assert "mine" in response.text
+    assert "theirs" not in response.text
+
+
+def test_other_users_profile_is_invisible_to_authed_user(tmp_path, monkeypatch):
+    """Hitting /ui/profiles/<slug> for another user's slug must behave as if
+    the slug doesn't exist — not leak their data via the edit form."""
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    other_user = "22222222-2222-2222-2222-222222222222"
+    profiles.save_profile_data(
+        "theirs",
+        {"box14": 999999, "province": "ON"},
+        user_id=other_user,
+    )
+
+    client = _build_client()
+    response = client.get("/ui/profiles/theirs")
+
+    # The page still renders (the edit form is tolerant of missing data)
+    # but it must not echo the other user's box14 into the form.
+    assert response.status_code == 200
+    assert "999999" not in response.text
+    assert "999999.00" not in response.text
+
+
+def test_nav_bar_shows_signed_in_email(tmp_path, monkeypatch):
+    """When a user is signed in, the nav bar surfaces their email and a
+    logout button on every /ui/* page."""
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    client = _build_client()
+    response = client.get("/ui/")
+
+    assert response.status_code == 200
+    body = response.text
+    assert TEST_USER_EMAIL in body
+    assert "/auth/logout" in body
