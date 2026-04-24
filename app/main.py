@@ -13,7 +13,9 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
+from starlette.middleware.sessions import SessionMiddleware
 
+from app.auth import router as auth_router
 from app.config import get_settings
 from pydantic import ValidationError
 from app.lifespan import build_application_lifespan
@@ -75,8 +77,21 @@ app = FastAPI(
     lifespan=build_application_lifespan("estimator"),
 )
 
+# D1.4: signed-cookie sessions for magic-link auth. The secret comes from
+# settings; in dev this is a well-known default documented in app/config.py,
+# in prod AUTH_SESSION_SECRET must be set.
+_settings_for_session = get_settings()
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_settings_for_session.session_secret,
+    session_cookie="taxapp_session",
+    https_only=False,
+    same_site="lax",
+)
+
 app.add_middleware(LocaleMiddleware)
 
+app.include_router(auth_router)
 app.include_router(ui_router)
 
 
