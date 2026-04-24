@@ -1,9 +1,8 @@
-"""Playwright smoke coverage for the upload → apply → preview UI workflow."""
-
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from dataclasses import dataclass
 import importlib
 import os
 import socket
@@ -18,10 +17,13 @@ import uvicorn
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
+from starlette.middleware.sessions import SessionMiddleware
 
 import app.wizard as wizard
+from app.auth import router as auth_router
+from app.auth.email import RecordingEmailBackend
 from app.config import get_settings
-from app.db import Base, create_session_factory
+from app.db import Base, UserRow, create_session_factory
 import app.ui.router as ui_router_module
 from app.ui import slip_ingest
 from app.wizard import profiles
@@ -50,6 +52,7 @@ class _ExpectCallable(Protocol):
 try:
     _playwright_sync_api = importlib.import_module("playwright.sync_api")
 except ModuleNotFoundError:
+
     class _MissingExpect:
         def __call__(self, *args: Any, **kwargs: Any) -> _LocatorAssertions:  # type: ignore[override]
             raise RuntimeError(
@@ -63,6 +66,14 @@ else:
 
 
 TEST_T183_KEY = "jLNo6J1iO5Y5P2bIC2T5T8DKS-p91Z9a7qV3-0iKqa4="
+TEST_USER_ID = "playwright-smoke-user"
+TEST_USER_EMAIL = "playwright-smoke@example.com"
+
+
+@dataclass(frozen=True)
+class UIServerContext:
+    url: str
+    email_backend: RecordingEmailBackend
 
 
 def _reserve_port(host: str = "127.0.0.1") -> int:
@@ -77,14 +88,17 @@ def sample_t4_slip_path() -> Path:
 
 
 @pytest.fixture(scope="session")
-def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[UIServerContext]:
     base_dir = tmp_path_factory.mktemp("ui-playwright")
     artifact_root = base_dir / "artifacts"
     summary_root = artifact_root / "summaries"
     artifact_root.mkdir(parents=True, exist_ok=True)
     summary_root.mkdir(parents=True, exist_ok=True)
 
-    original_env = {key: os.environ.get(key) for key in ("ARTIFACT_ROOT", "DAILY_SUMMARY_ROOT", "T183_CRYPTO_KEY")}
+    original_env = {
+        key: os.environ.get(key)
+        for key in ("ARTIFACT_ROOT", "DAILY_SUMMARY_ROOT", "T183_CRYPTO_KEY")
+    }
 
     original_profiles = {
         "BASE_DIR": profiles.BASE_DIR,
@@ -127,7 +141,12 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         profiles.PROFILE_TRASH_DIR.mkdir(parents=True, exist_ok=True)
         (base_dir / "inbox").mkdir(parents=True, exist_ok=True)
 
-        profiles.save_profile_data("playwright-smoke", {"province": "ON", "tax_year": 2025})
+        profiles.save_profile_data(
+            "playwright-smoke",
+            {"province": "ON", "tax_year": 2025},
+            user_id=TEST_USER_ID,
+        )
+        profiles.set_active_profile("playwright-smoke", user_id=TEST_USER_ID)
 
         test_db_engine = create_async_engine(
             "sqlite+aiosqlite:///:memory:",
@@ -142,9 +161,28 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         asyncio.run(_init_db())
         test_session_factory = create_session_factory(test_db_engine)
 
+        async def _seed_user() -> None:
+            async with test_session_factory() as session:
+                session.add(UserRow(id=TEST_USER_ID, email=TEST_USER_EMAIL))
+                await session.commit()
+
+        asyncio.run(_seed_user())
+
+        email_backend = RecordingEmailBackend()
+
         app = FastAPI()
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key="test-secret-key-not-for-prod",
+            session_cookie="taxapp_session",
+            https_only=False,
+            same_site="lax",
+        )
+        app.include_router(auth_router)
         app.include_router(ui_router_module.router)
         app.state.db_session_factory = test_session_factory
+        app.state.email_backend = email_backend
+        app.state.auth_token_ttl_minutes = 15
         app.state.slip_staging_store = slip_ingest.SlipStagingStore(test_session_factory)
         app.state.settings = settings
 
@@ -160,7 +198,7 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 raise RuntimeError("UI server failed to start")
             time.sleep(0.05)
 
-        yield f"http://{host}:{port}"
+        yield UIServerContext(f"http://{host}:{port}", email_backend)
     finally:
         if server is not None:
             server.should_exit = True
@@ -197,10 +235,25 @@ def ui_server_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         get_settings.cache_clear()
 
 
+def _sign_in(page: Any, server: UIServerContext) -> None:
+    server.email_backend.sent.clear()
+    page.goto(f"{server.url}/auth/login?next=/ui/returns/new")
+    page.locator("input[name='email']").fill(TEST_USER_EMAIL)
+    page.get_by_role("button", name="Send sign-in link").click()
+    expect(page.get_by_role("heading", name="Check your email")).to_be_visible()
+    assert server.email_backend.sent
+    page.goto(server.email_backend.sent[-1].link)
+
+
 @pytest.mark.smoke
 @pytest.mark.playwright_smoke
-def test_upload_apply_preview_flow(page, ui_server_url: str, sample_t4_slip_path: Path) -> None:
-    page.goto(f"{ui_server_url}/ui/returns/new?step=slips")
+def test_upload_apply_preview_flow(
+    page: Any,
+    ui_server: UIServerContext,
+    sample_t4_slip_path: Path,
+) -> None:
+    _sign_in(page, ui_server)
+    page.goto(f"{ui_server.url}/ui/returns/new?step=slips")
 
     dropzone = page.locator("#t4-slip-dropzone")
     queue = page.locator("#t4-file-queue")
@@ -233,3 +286,4 @@ def test_upload_apply_preview_flow(page, ui_server_url: str, sample_t4_slip_path
     queue_item.locator(".file-remove").click()
     expect(queue).to_have_attribute("data-empty", "true")
     expect(dropzone).to_be_focused()
+    
