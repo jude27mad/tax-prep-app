@@ -115,23 +115,60 @@
         color: #1e3a8a;
         font-weight: 600;
       }
+      .nav-session {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.9);
+      }
+      .nav-session form {
+        display: inline;
+      }
+      .nav-session button {
+        background: transparent;
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.55);
+        padding: 0.2rem 0.55rem;
+        border-radius: 0.3rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .nav-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 1.25rem;
+      }
     </style>
     {% block head %}{% endblock %}
   </head>
   <body>
     <header class="site">
       <span>{{ t("nav.app_title") }}</span>
-      <nav class="locale-switcher" aria-label="{{ t('nav.language') }}">
-        {% for code in supported_locales %}
-          <form method="post" action="/ui/locale/{{ code }}">
-            <button type="submit"
-                    aria-current="{{ 'true' if current_locale() == code else 'false' }}"
-                    aria-label="{{ t('nav.language') }}: {{ code | upper }}">
-              {{ code | upper }}
-            </button>
-          </form>
-        {% endfor %}
-      </nav>
+      <div class="nav-right">
+        {% set _signed_in_email = current_user_email() %}
+        {% if _signed_in_email %}
+          <span class="nav-session">
+            <span aria-label="{{ t('auth.nav.signed_in_as') }}">
+              {{ t("auth.nav.signed_in_as") }} <strong>{{ _signed_in_email }}</strong>
+            </span>
+            <form method="post" action="/auth/logout">
+              <button type="submit">{{ t("auth.nav.logout") }}</button>
+            </form>
+          </span>
+        {% endif %}
+        <nav class="locale-switcher" aria-label="{{ t('nav.language') }}">
+          {% for code in supported_locales %}
+            <form method="post" action="/ui/locale/{{ code }}">
+              <button type="submit"
+                      aria-current="{{ 'true' if current_locale() == code else 'false' }}"
+                      aria-label="{{ t('nav.language') }}: {{ code | upper }}">
+                {{ code | upper }}
+              </button>
+            </form>
+          {% endfor %}
+        </nav>
+      </div>
     </header>
     <main>
       {% block content %}{% endblock %}

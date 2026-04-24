@@ -20,6 +20,7 @@ from app.auth.deps import (
     AuthError,
     get_current_user,
     require_user,
+    require_user_web,
 )
 from app.auth.email import (
     ConsoleEmailBackend,
@@ -47,5 +48,6 @@ __all__ = [
     "get_current_user",
     "make_email_backend",
     "require_user",
+    "require_user_web",
     "router",
 ]

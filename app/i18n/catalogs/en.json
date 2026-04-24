@@ -20,5 +20,16 @@
   "trash.profile": "Profile",
   "trash.deleted": "Deleted",
   "trash.restore": "Restore",
-  "trash.empty": "The trash is empty."
+  "trash.empty": "The trash is empty.",
+  "auth.login.heading": "Sign in",
+  "auth.login.intro": "Enter your email and we'll send you a one-time sign-in link.",
+  "auth.login.email_label": "Email address",
+  "auth.login.submit": "Send sign-in link",
+  "auth.login.hint": "No password needed. The link is valid for 15 minutes.",
+  "auth.sent.heading": "Check your email",
+  "auth.sent.body": "We've sent a sign-in link to the address you provided. Click the link to finish signing in.",
+  "auth.sent.ttl_hint": "The link is valid for 15 minutes. You can close this tab.",
+  "auth.sent.back": "Back to sign in",
+  "auth.nav.signed_in_as": "Signed in as",
+  "auth.nav.logout": "Sign out"
 }

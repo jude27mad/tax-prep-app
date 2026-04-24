@@ -75,6 +75,16 @@ class DocumentRow(Base, table=True):
         description="Stable UUID used downstream as a slip FK.",
     )
 
+    user_id: str | None = Field(
+        default=None,
+        index=True,
+        max_length=36,
+        description=(
+            "FK to users.id (soft — no DB-level ON DELETE). Nullable for rows "
+            "pre-D1.6; newly-ingested documents always stamp this from the "
+            "authenticated session."
+        ),
+    )
     profile_slug: str = Field(
         index=True,
         max_length=128,
@@ -142,4 +152,5 @@ class DocumentRow(Base, table=True):
 
     __table_args__ = (
         Index("ix_documents_profile_year_status", "profile_slug", "tax_year", "status"),
+        Index("ix_documents_user_profile_year", "user_id", "profile_slug", "tax_year"),
     )

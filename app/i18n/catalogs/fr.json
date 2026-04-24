@@ -20,5 +20,16 @@
   "trash.profile": "Profil",
   "trash.deleted": "Supprimé",
   "trash.restore": "Restaurer",
-  "trash.empty": "La corbeille est vide."
+  "trash.empty": "La corbeille est vide.",
+  "auth.login.heading": "Connexion",
+  "auth.login.intro": "Entrez votre courriel et nous vous enverrons un lien de connexion à usage unique.",
+  "auth.login.email_label": "Adresse courriel",
+  "auth.login.submit": "Envoyer le lien de connexion",
+  "auth.login.hint": "Aucun mot de passe requis. Le lien est valide pendant 15 minutes.",
+  "auth.sent.heading": "Vérifiez votre courriel",
+  "auth.sent.body": "Nous avons envoyé un lien de connexion à l'adresse fournie. Cliquez sur le lien pour terminer la connexion.",
+  "auth.sent.ttl_hint": "Le lien est valide pendant 15 minutes. Vous pouvez fermer cet onglet.",
+  "auth.sent.back": "Retour à la connexion",
+  "auth.nav.signed_in_as": "Connecté en tant que",
+  "auth.nav.logout": "Déconnexion"
 }

@@ -105,7 +105,9 @@ class AuthService:
         self._verify_base_url = verify_base_url.rstrip("/")
         self._token_ttl = token_ttl
 
-    async def request_magic_link(self, email: str) -> MagicLink:
+    async def request_magic_link(
+        self, email: str, *, next_path: str | None = None
+    ) -> MagicLink:
         normalized = _normalize_email(email)
         if not normalized or "@" not in normalized:
             raise ValueError("Invalid email address.")
@@ -124,7 +126,13 @@ class AuthService:
                 )
             )
 
-        link = f"{self._verify_base_url}/auth/verify?{urlencode({'token': raw_token})}"
+        # Preserve ``next`` through the email round-trip so clicking the
+        # link lands the user where they originally tried to go. The
+        # verify handler re-validates the path before redirecting.
+        params: dict[str, str] = {"token": raw_token}
+        if next_path and next_path.startswith("/") and not next_path.startswith("//"):
+            params["next"] = next_path
+        link = f"{self._verify_base_url}/auth/verify?{urlencode(params)}"
         await self._email_backend.send_magic_link(to=normalized, link=link)
 
         return MagicLink(
