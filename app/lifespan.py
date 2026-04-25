@@ -11,8 +11,9 @@ from typing import AsyncContextManager
 import httpx
 from fastapi import FastAPI
 
-from app.auth.email import make_email_backend
-from app.config import get_settings
+from app.auth.email import SmtpConfig, make_email_backend
+from app.auth.rate_limit import AuthRequestRateLimiter, RateLimiter
+from app.config import Settings, get_settings
 from app.db import (
     build_database_url,
     create_engine as create_db_engine,
@@ -85,6 +86,31 @@ def _open_telemetry_sink(logger: logging.Logger, app_label: str) -> logging.Hand
     return handler
 
 
+def _build_smtp_config(settings: Settings) -> SmtpConfig | None:
+    """Materialize an SMTP config when the SMTP backend is selected.
+
+    Returns ``None`` for the console backend so :func:`make_email_backend`
+    follows its zero-config path. Settings validation already enforces
+    that host + from are present when ``auth_email_backend == "smtp"``,
+    so we can rely on that here.
+    """
+    if settings.auth_email_backend != "smtp":
+        return None
+    assert settings.auth_smtp_host is not None  # validated by Settings
+    assert settings.auth_smtp_from is not None
+    return SmtpConfig(
+        host=settings.auth_smtp_host,
+        port=settings.auth_smtp_port,
+        username=settings.auth_smtp_username,
+        password=settings.auth_smtp_password,
+        use_tls=settings.auth_smtp_use_tls,
+        use_ssl=settings.auth_smtp_use_ssl,
+        timeout=settings.auth_smtp_timeout,
+        from_address=settings.auth_smtp_from,
+        subject=settings.auth_smtp_subject,
+    )
+
+
 async def _invoke_hook(hook: Hook | None, app: FastAPI) -> None:
     if hook is None:
         return
@@ -126,7 +152,20 @@ def build_application_lifespan(
         database_url = build_database_url(settings)
         db_engine = create_db_engine(database_url)
         db_session_factory = create_session_factory(db_engine)
-        email_backend = make_email_backend(settings.auth_email_backend)
+        email_backend = make_email_backend(
+            settings.auth_email_backend,
+            smtp_config=_build_smtp_config(settings),
+        )
+        request_rate_limiter = AuthRequestRateLimiter(
+            per_email=RateLimiter(
+                limit=settings.auth_request_rate_per_email,
+                window_seconds=settings.auth_request_rate_window_seconds,
+            ),
+            per_ip=RateLimiter(
+                limit=settings.auth_request_rate_per_ip,
+                window_seconds=settings.auth_request_rate_window_seconds,
+            ),
+        )
 
         app.state.settings = settings
         app.state.http_client = http_client
@@ -144,6 +183,7 @@ def build_application_lifespan(
         app.state.database_url = database_url
         app.state.email_backend = email_backend
         app.state.auth_token_ttl_minutes = settings.auth_token_ttl_minutes
+        app.state.auth_request_rate_limiter = request_rate_limiter
 
         logger.info(
             "Startup complete: schemas=%s fonts_registered=%s feature_efile_xml=%s "
@@ -189,6 +229,7 @@ def build_application_lifespan(
                 "database_url",
                 "email_backend",
                 "auth_token_ttl_minutes",
+                "auth_request_rate_limiter",
             ):
                 if hasattr(app.state, attr):
                     delattr(app.state, attr)
