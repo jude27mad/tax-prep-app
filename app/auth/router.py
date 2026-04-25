@@ -43,7 +43,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, 
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.auth.deps import get_auth_service, require_user
+from app.auth.deps import get_auth_service, get_request_rate_limiter, require_user
+from app.auth.rate_limit import AuthRequestRateLimiter
 from app.auth.service import (
     AuthService,
     TokenExpiredError,
@@ -153,15 +154,74 @@ async def sent_page(request: Request) -> HTMLResponse:
     )
 
 
+def _client_ip(request: Request) -> str:
+    """Best-effort source IP for rate-limit bucketing.
+
+    Honors ``X-Forwarded-For``'s left-most entry when present (the
+    convention for the original client behind any number of proxies),
+    falling back to the socket peer. We do not validate the proxy chain
+    here — a misconfigured deploy where the app is exposed without a
+    trusted proxy would let attackers spoof this header. That's a
+    known limit of in-memory rate limiting; trust boundary lives at
+    the reverse proxy.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        first = forwarded.split(",", 1)[0].strip()
+        if first:
+            return first
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
 @router.post("/request")
 async def request_link(
     request: Request,
     email: str = Form(...),
     next: str = Form(""),  # noqa: A002
     service: AuthService = Depends(get_auth_service),
+    rate_limiter: AuthRequestRateLimiter | None = Depends(get_request_rate_limiter),
 ) -> Response:
-    sent = True
     safe_next = _safe_next_path(next)
+
+    # Rate-limit before doing any DB / SMTP work. Returning 429 here is
+    # the one place we deliberately diverge from the oracle-prevention
+    # 204 default: the cap exists to push back on abuse, and operators
+    # need a visible signal that abuse is in progress. Per-email caps
+    # apply to the lowercased address; per-IP caps apply to the request
+    # source (X-Forwarded-For aware).
+    if rate_limiter is not None:
+        decision = await rate_limiter.check(email=email, ip=_client_ip(request))
+        if not decision.allowed:
+            _LOGGER.warning(
+                "Rate-limited /auth/request: email=%s ip=%s retry_after=%ss",
+                email,
+                _client_ip(request),
+                decision.retry_after,
+            )
+            headers = {"Retry-After": str(decision.retry_after)}
+            if _wants_html(request):
+                return TEMPLATES.TemplateResponse(
+                    "auth_login.html",
+                    {
+                        "request": request,
+                        "next_path": safe_next,
+                        "email_value": email,
+                        "error": (
+                            "Too many sign-in attempts. "
+                            f"Please try again in {decision.retry_after} seconds."
+                        ),
+                    },
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    headers=headers,
+                )
+            return Response(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers=headers,
+            )
+
+    sent = True
     try:
         await service.request_magic_link(email, next_path=safe_next)
     except ValueError as exc:
@@ -180,7 +240,7 @@ async def request_link(
                 "auth_login.html",
                 {
                     "request": request,
-                    "next_path": _safe_next_path(next),
+                    "next_path": safe_next,
                     "email_value": email,
                     "error": "That doesn't look like a valid email address.",
                 },

@@ -83,6 +83,58 @@ class Settings(BaseModel):
         default_factory=lambda: int(os.getenv("AUTH_TOKEN_TTL_MINUTES", "15"))
     )
 
+    # D1.7 — SMTP transport for magic links. Required only when
+    # auth_email_backend="smtp"; otherwise these are inert. We validate the
+    # required pair (host + from) in a model_validator so misconfigured
+    # prod boots fail loudly instead of silently dropping login emails.
+    auth_smtp_host: str | None = Field(
+        default_factory=lambda: os.getenv("AUTH_SMTP_HOST")
+    )
+    auth_smtp_port: int = Field(
+        default_factory=lambda: int(os.getenv("AUTH_SMTP_PORT", "587"))
+    )
+    auth_smtp_username: str | None = Field(
+        default_factory=lambda: os.getenv("AUTH_SMTP_USERNAME")
+    )
+    auth_smtp_password: str | None = Field(
+        default_factory=lambda: os.getenv("AUTH_SMTP_PASSWORD")
+    )
+    auth_smtp_use_tls: bool = Field(
+        default_factory=lambda: _env_bool("AUTH_SMTP_USE_TLS", True)
+    )
+    auth_smtp_use_ssl: bool = Field(
+        default_factory=lambda: _env_bool("AUTH_SMTP_USE_SSL", False)
+    )
+    auth_smtp_timeout: float = Field(
+        default_factory=lambda: float(os.getenv("AUTH_SMTP_TIMEOUT", "10"))
+    )
+    auth_smtp_from: str | None = Field(
+        default_factory=lambda: os.getenv("AUTH_SMTP_FROM")
+    )
+    auth_smtp_subject: str = Field(
+        default_factory=lambda: os.getenv(
+            "AUTH_SMTP_SUBJECT", "Your sign-in link"
+        )
+    )
+
+    # D1.7 — rate limit on POST /auth/request. Per-email caps the obvious
+    # abuse of mailbombing one address; per-IP caps drive-by enumeration
+    # from a single source. Both windows share the same duration (seconds).
+    # The limiter is in-memory: behind a multi-worker deploy the effective
+    # cap multiplies by worker count. Future work moves this to Redis if
+    # we add horizontal scaling.
+    auth_request_rate_per_email: int = Field(
+        default_factory=lambda: int(os.getenv("AUTH_REQUEST_RATE_PER_EMAIL", "5"))
+    )
+    auth_request_rate_per_ip: int = Field(
+        default_factory=lambda: int(os.getenv("AUTH_REQUEST_RATE_PER_IP", "10"))
+    )
+    auth_request_rate_window_seconds: int = Field(
+        default_factory=lambda: int(
+            os.getenv("AUTH_REQUEST_RATE_WINDOW_SECONDS", "900")
+        )
+    )
+
     model_config = ConfigDict(frozen=True)
 
     @field_validator("efile_environment", mode="before")
@@ -117,11 +169,60 @@ class Settings(BaseModel):
             raise ValueError("AUTH_TOKEN_TTL_MINUTES must be positive")
         return value
 
+    @field_validator("auth_smtp_port")
+    @classmethod
+    def _validate_smtp_port(cls, value: int) -> int:
+        if not (1 <= value <= 65535):
+            raise ValueError("AUTH_SMTP_PORT must be between 1 and 65535")
+        return value
+
+    @field_validator("auth_smtp_timeout")
+    @classmethod
+    def _validate_smtp_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("AUTH_SMTP_TIMEOUT must be positive")
+        return value
+
+    @field_validator(
+        "auth_request_rate_per_email",
+        "auth_request_rate_per_ip",
+        "auth_request_rate_window_seconds",
+    )
+    @classmethod
+    def _validate_rate_limit(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("Rate-limit settings must be positive integers")
+        return value
+
     @model_validator(mode="after")
     def _require_endpoints(self) -> "Settings":
         profile = self.profile()
         if profile.endpoint is None:
             raise ValueError(f"Missing EFILE endpoint for environment {profile.environment}")
+        return self
+
+    @model_validator(mode="after")
+    def _require_smtp_when_selected(self) -> "Settings":
+        # Validating here (instead of at lifespan time) so misconfigured
+        # prod boots fail before SessionMiddleware accepts any traffic.
+        # Tests / dev that don't opt into SMTP keep the zero-config path.
+        if self.auth_email_backend == "smtp":
+            missing = [
+                name
+                for name, value in (
+                    ("AUTH_SMTP_HOST", self.auth_smtp_host),
+                    ("AUTH_SMTP_FROM", self.auth_smtp_from),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"AUTH_EMAIL_BACKEND=smtp requires {', '.join(missing)}."
+                )
+            if self.auth_smtp_use_tls and self.auth_smtp_use_ssl:
+                raise ValueError(
+                    "AUTH_SMTP_USE_TLS and AUTH_SMTP_USE_SSL are mutually exclusive."
+                )
         return self
 
     def profile(self) -> EfileProfile:

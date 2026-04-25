@@ -214,6 +214,12 @@ Key environment variables (defaults shown):
 | `SOFTWARE_VERSION`                                        | Application version string                    | `0.0.3`                                             |
 | `T183_CRYPTO_KEY`                                         | Fernet key for encrypted T183/T2183 retention | unset                                               |
 | `RETENTION_T2183_ENABLED`                                 | Toggle T2183 retention                        | `false`                                             |
+| `AUTH_EMAIL_BACKEND`                                      | Magic-link transport (`console` or `smtp`)    | `console`                                           |
+| `AUTH_SMTP_HOST` / `AUTH_SMTP_FROM`                       | SMTP server + envelope sender (req. for smtp) | unset                                               |
+| `AUTH_SMTP_PORT` / `AUTH_SMTP_USERNAME` / `AUTH_SMTP_PASSWORD` | SMTP submission config                    | `587` / unset / unset                               |
+| `AUTH_SMTP_USE_TLS` / `AUTH_SMTP_USE_SSL`                 | STARTTLS vs implicit TLS (mutually exclusive) | `true` / `false`                                    |
+| `AUTH_REQUEST_RATE_PER_EMAIL` / `AUTH_REQUEST_RATE_PER_IP` | /auth/request caps within the window         | `5` / `10`                                          |
+| `AUTH_REQUEST_RATE_WINDOW_SECONDS`                        | Rate-limit window duration                    | `900` (15 min)                                      |
 
 Example (PowerShell):
 

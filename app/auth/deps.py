@@ -25,6 +25,7 @@ from urllib.parse import quote
 from fastapi import Depends, HTTPException, Request, status
 
 from app.auth.email import EmailBackend
+from app.auth.rate_limit import AuthRequestRateLimiter
 from app.auth.service import AuthService
 from app.db import UserRow, session_scope
 
@@ -109,3 +110,14 @@ def get_auth_service(request: Request) -> AuthService:
         verify_base_url=base_url,
         token_ttl=timedelta(minutes=ttl_minutes),
     )
+
+
+def get_request_rate_limiter(request: Request) -> AuthRequestRateLimiter | None:
+    """Resolve the /auth/request rate limiter from app state.
+
+    Returns ``None`` when the limiter is not configured — test harnesses
+    that build a bare router app skip wiring it up, and the route falls
+    open in that case. Production callers always go through
+    :func:`build_application_lifespan`, which sets the attribute.
+    """
+    return getattr(request.app.state, "auth_request_rate_limiter", None)
