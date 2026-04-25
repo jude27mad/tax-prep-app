@@ -24,3 +24,4 @@ tax_app.db-journal
 *.sqlite-journal
 node_modules/
 venv/
+.claude/worktrees/
