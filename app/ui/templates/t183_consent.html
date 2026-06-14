@@ -30,6 +30,7 @@
     {% endif %}
 
     <form method="post">
+      {{ csrf_input() }}
       <fieldset style="border:none; padding:0; margin:0 0 1.5rem 0;">
         <legend style="font-weight:600; margin-bottom:0.5rem;">Consent overview</legend>
         <p style="margin-top:0;">

@@ -153,6 +153,7 @@
               {{ t("auth.nav.signed_in_as") }} <strong>{{ _signed_in_email }}</strong>
             </span>
             <form method="post" action="/auth/logout">
+              {{ csrf_input() }}
               <button type="submit">{{ t("auth.nav.logout") }}</button>
             </form>
           </span>
@@ -160,6 +161,7 @@
         <nav class="locale-switcher" aria-label="{{ t('nav.language') }}">
           {% for code in supported_locales %}
             <form method="post" action="/ui/locale/{{ code }}">
+              {{ csrf_input() }}
               <button type="submit"
                       aria-current="{{ 'true' if current_locale() == code else 'false' }}"
                       aria-label="{{ t('nav.language') }}: {{ code | upper }}">

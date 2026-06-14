@@ -52,6 +52,7 @@ from app.wizard.estimator import compute_tax_summary as _compute_tax_summary
 from app.wizard.profiles import INBOX_DIR
 from app.ui import router as ui_router
 from app.i18n import LocaleMiddleware
+from app.web_security import CSRFMiddleware, SecurityHeadersMiddleware
 from app.core.provinces import (
     DEFAULT_TAX_YEAR,
     list_provincial_calculators as list_provincial_adapters,
@@ -77,19 +78,32 @@ app = FastAPI(
     lifespan=build_application_lifespan("estimator"),
 )
 
+# Middleware order matters. ``add_middleware`` stacks last-added-outermost, so
+# the run order on a request is:
+#   SecurityHeaders -> Session -> CSRF -> Locale -> router
+# Session must sit *outside* CSRF so (a) the session dict is on the scope when
+# CSRF reads/mints the token and (b) a freshly minted token is serialized into
+# the Set-Cookie on the way out. SecurityHeaders sits outermost so its headers
+# land on every response, including CSRF 403s and error pages.
+_settings_for_session = get_settings()
+
+app.add_middleware(LocaleMiddleware)
+app.add_middleware(CSRFMiddleware)
 # D1.4: signed-cookie sessions for magic-link auth. The secret comes from
 # settings; in dev this is a well-known default documented in app/config.py,
-# in prod AUTH_SESSION_SECRET must be set.
-_settings_for_session = get_settings()
+# in prod AUTH_SESSION_SECRET must be set. ``https_only``/Secure tracks the
+# environment (PROD by default) so prod never ships the cookie over plaintext.
 app.add_middleware(
     SessionMiddleware,
     secret_key=_settings_for_session.session_secret,
     session_cookie="taxapp_session",
-    https_only=False,
+    https_only=_settings_for_session.session_https_only,
     same_site="lax",
 )
-
-app.add_middleware(LocaleMiddleware)
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enable_hsts=_settings_for_session.session_https_only,
+)
 
 app.include_router(auth_router)
 app.include_router(ui_router)

@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.auth import require_user_web
 from app.config import Settings, get_settings
+from app.web_security import csrf_input_global, csrf_token_global
 from app.core.models import ReturnInput
 from app.db import UserRow
 from app.i18n import (
@@ -107,6 +108,8 @@ TEMPLATES.env.globals["t"] = _jinja_t
 TEMPLATES.env.globals["current_locale"] = _jinja_current_locale
 TEMPLATES.env.globals["supported_locales"] = SUPPORTED_LOCALES
 TEMPLATES.env.globals["current_user_email"] = _jinja_current_user_email
+TEMPLATES.env.globals["csrf_token"] = csrf_token_global
+TEMPLATES.env.globals["csrf_input"] = csrf_input_global
 
 # Attach test-hook attributes directly on the router object
 r = cast(Any, router)
