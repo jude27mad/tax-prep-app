@@ -918,6 +918,7 @@ def profiles_home(
         })
     trashed_items.sort(key=lambda item: item["timestamp"] or datetime.min, reverse=True)
     return TEMPLATES.TemplateResponse(
+        request,
         "index.html",
         {
             "request": request,
@@ -1019,7 +1020,7 @@ def view_t183_consent(
         )
     if not context["has_valid_sin"]:
         context.setdefault("errors", {})["sin"] = "Taxpayer SIN must be recorded before consent."
-    return TEMPLATES.TemplateResponse("t183_consent.html", context)
+    return TEMPLATES.TemplateResponse(request, "t183_consent.html", context)
 
 
 async def _persist_t183_consent(
@@ -1125,7 +1126,7 @@ async def submit_t183_consent(
             form_data=form_data,
             user_id=user.id,
         )
-        return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
+        return TEMPLATES.TemplateResponse(request, "t183_consent.html", context, status_code=400)
     if confirm not in {"on", "true", "1"}:
         context, _, _, _ = _t183_consent_context(
             request,
@@ -1134,7 +1135,7 @@ async def submit_t183_consent(
             form_data=form_data,
             user_id=user.id,
         )
-        return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
+        return TEMPLATES.TemplateResponse(request, "t183_consent.html", context, status_code=400)
     context, state, has_state, sin = _t183_consent_context(
         request, slug, form_data=form_data, user_id=user.id
     )
@@ -1142,7 +1143,7 @@ async def submit_t183_consent(
         state = _default_return_form_state()
     if not sin or len(sin) != 9 or not sin.isdigit():
         context.setdefault("errors", {})["sin"] = "Taxpayer SIN must be recorded before consent."
-        return TEMPLATES.TemplateResponse("t183_consent.html", context, status_code=400)
+        return TEMPLATES.TemplateResponse(request, "t183_consent.html", context, status_code=400)
     form_data.update(
         {
             "signature_name": signature,
@@ -1237,7 +1238,7 @@ def edit_profile(
     records, t183_info = _collect_t183_records(request, normalized, user_id=user.id)
     context["t183_records"] = records
     context["t183_info"] = t183_info
-    return TEMPLATES.TemplateResponse("edit.html", context)
+    return TEMPLATES.TemplateResponse(request, "edit.html", context)
 
 
 @router.post("/profiles/{slug}", response_class=HTMLResponse)
@@ -1253,7 +1254,7 @@ async def save_profile(
     if field_errors:
         context: dict[str, Any] = _profile_context(normalized, data, field_errors, user_id=user.id)
         context.update({"request": request, "messages": ["Please fix the highlighted fields."]})
-        return TEMPLATES.TemplateResponse("edit.html", context, status_code=400)
+        return TEMPLATES.TemplateResponse(request, "edit.html", context, status_code=400)
     save_profile_data(normalized, data, user_id=user.id)
     return RedirectResponse(url=f"/ui/profiles/{normalized}?saved=1", status_code=303)
 
@@ -1277,7 +1278,7 @@ async def preview_profile(
     if errors:
         pe = cast(list[str], context.setdefault("preview_errors", []))
         pe.extend(list(errors.values()))
-    return TEMPLATES.TemplateResponse("preview.html", context)
+    return TEMPLATES.TemplateResponse(request, "preview.html", context)
 
 
 def _render_return_form(
@@ -1322,7 +1323,7 @@ def _render_return_form(
         "autosave_interval": AUTOSAVE_INTERVAL_MS,
     }
     context.update(_transmit_gate_context(form_state, settings))
-    return TEMPLATES.TemplateResponse("return_form.html", context)
+    return TEMPLATES.TemplateResponse(request, "return_form.html", context)
 
 
 @router.get("/returns/new", response_class=HTMLResponse)
@@ -1396,7 +1397,7 @@ async def prepare_return(
         "autosave_interval": AUTOSAVE_INTERVAL_MS,
     }
     context.update(_transmit_gate_context(state, settings))
-    return TEMPLATES.TemplateResponse("return_form.html", context, status_code=status_code)
+    return TEMPLATES.TemplateResponse(request, "return_form.html", context, status_code=status_code)
 
 
 @router.post("/returns/autosave", response_class=JSONResponse, name="ui_autosave_return")
