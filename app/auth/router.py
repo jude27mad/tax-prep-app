@@ -94,10 +94,14 @@ def _auth_jinja_current_user_email(ctx):  # type: ignore[no-untyped-def]
     return getattr(user, "email", None) if user is not None else None
 
 
+from app.web_security import csrf_input_global, csrf_token_global  # noqa: E402 — co-located with env wiring
+
 TEMPLATES.env.globals["t"] = _auth_jinja_t
 TEMPLATES.env.globals["current_locale"] = _auth_jinja_current_locale
 TEMPLATES.env.globals["supported_locales"] = SUPPORTED_LOCALES
 TEMPLATES.env.globals["current_user_email"] = _auth_jinja_current_user_email
+TEMPLATES.env.globals["csrf_token"] = csrf_token_global
+TEMPLATES.env.globals["csrf_input"] = csrf_input_global
 
 
 def _safe_next_path(value: str | None) -> str:

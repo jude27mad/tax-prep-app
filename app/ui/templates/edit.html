@@ -49,17 +49,20 @@
 
     <div style="margin-bottom:1rem;">
       <form class="inline" method="post" action="/ui/profiles/{{ profile_slug }}/rename">
+        {{ csrf_input() }}
         <label for="rename">Rename profile:</label>
         <input id="rename" name="new_name" type="text" required value="{{ profile_slug }}" />
         <button type="submit" class="btn secondary">Rename</button>
       </form>
       <form class="inline" method="post" action="/ui/profiles/{{ profile_slug }}/delete" onsubmit="return confirm('Move this profile to trash?');">
+        {{ csrf_input() }}
         <button type="submit" class="btn danger">Delete</button>
       </form>
     </div>
 
     <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
       <form id="profile-form" method="post" action="/ui/profiles/{{ profile_slug }}" data-preview-url="/ui/profiles/{{ profile_slug }}/preview" style="flex:1 1 320px;">
+        {{ csrf_input() }}
         {% for field in fields %}
           <div style="margin-bottom:1rem;">
             <label for="field-{{ field.name }}">{{ field.label }}{% if not field.optional %} *{% endif %}</label><br />

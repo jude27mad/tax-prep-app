@@ -76,6 +76,14 @@ class Settings(BaseModel):
             "dev-only-change-me-do-not-use-in-prod",
         )
     )
+    # Marks the session cookie ``Secure`` (HTTPS-only) and turns on HSTS.
+    # Defaults on in PROD (EFILE_ENV=PROD) so prod boots refuse to ship the
+    # cookie over plaintext; dev/CERT stays off so http://localhost works.
+    # Override explicitly with SESSION_COOKIE_SECURE when the environment
+    # default is wrong (e.g. a CERT box behind real TLS).
+    session_https_only: bool = Field(
+        default_factory=lambda: _env_bool("SESSION_COOKIE_SECURE", _env_env() == "PROD")
+    )
     auth_email_backend: str = Field(
         default_factory=lambda: os.getenv("AUTH_EMAIL_BACKEND", "console")
     )

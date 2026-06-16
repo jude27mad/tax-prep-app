@@ -14,6 +14,7 @@
   {% endif %}
 
   <form method="post" action="/auth/request">
+    {{ csrf_input() }}
     {% if next_path %}<input type="hidden" name="next" value="{{ next_path }}" />{% endif %}
     <label for="email" style="display: block; margin-bottom: 0.25rem;">
       {{ t("auth.login.email_label") }}

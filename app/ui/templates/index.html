@@ -24,9 +24,11 @@
               <td>
                 <a class="btn" href="/ui/profiles/{{ slug }}">{{ t("profiles.open") }}</a>
                 <form class="inline" method="post" action="/ui/profiles/{{ slug }}/set-active">
+                  {{ csrf_input() }}
                   <button type="submit" class="btn secondary">{{ t("profiles.set_active") }}</button>
                 </form>
                 <form class="inline" method="post" action="/ui/profiles/{{ slug }}/delete" onsubmit="return confirm('{{ t("profiles.delete_confirm") }}');">
+                  {{ csrf_input() }}
                   <button type="submit" class="btn danger">{{ t("profiles.delete") }}</button>
                 </form>
               </td>
@@ -39,6 +41,7 @@
     {% endif %}
     <h3>{{ t("profiles.create_heading") }}</h3>
     <form method="post" action="/ui/profiles">
+      {{ csrf_input() }}
       <label for="profile-name">{{ t("profiles.name_label") }}</label><br />
       <input id="profile-name" name="name" type="text" required placeholder="{{ t('profiles.name_placeholder') }}" />
       <button type="submit" class="btn">{{ t("common.create") }}</button>
@@ -69,6 +72,7 @@
               </td>
               <td>
                 <form class="inline" method="post" action="/ui/profiles/{{ entry.slug }}/restore">
+                  {{ csrf_input() }}
                   <button type="submit" class="btn">{{ t("trash.restore") }}</button>
                 </form>
               </td>
