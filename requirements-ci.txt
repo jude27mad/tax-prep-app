@@ -1,4 +1,4 @@
-aiosmtplib==3.0.2
+aiosmtplib==5.1.2
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0
@@ -8,7 +8,7 @@ cffi==2.0.0
 charset-normalizer==3.4.3
 click==8.2.1
 colorama==0.4.6
-cryptography==46.0.7
+cryptography==48.0.1
 elementpath==5.1.1
 fastapi==0.136.0
 greenlet==3.4.0
