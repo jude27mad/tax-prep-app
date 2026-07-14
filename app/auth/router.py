@@ -140,6 +140,7 @@ async def login_page(
     next: str = "",  # noqa: A002 — shadowing builtin is fine here as query arg
 ) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(
+        request,
         "auth_login.html",
         {
             "request": request,
@@ -153,6 +154,7 @@ async def login_page(
 @router.get("/sent", response_class=HTMLResponse)
 async def sent_page(request: Request) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(
+        request,
         "auth_sent.html",
         {"request": request},
     )
@@ -207,6 +209,7 @@ async def request_link(
             headers = {"Retry-After": str(decision.retry_after)}
             if _wants_html(request):
                 return TEMPLATES.TemplateResponse(
+                    request,
                     "auth_login.html",
                     {
                         "request": request,
@@ -241,6 +244,7 @@ async def request_link(
     if _wants_html(request):
         if not sent:
             return TEMPLATES.TemplateResponse(
+                request,
                 "auth_login.html",
                 {
                     "request": request,
