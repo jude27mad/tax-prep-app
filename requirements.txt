@@ -38,7 +38,7 @@ itsdangerous>=2.2,<3.0
 
 # D1.7: SMTP transport for magic-link emails. Async submission so the
 # auth request handler doesn't block the event loop on slow MTAs.
-aiosmtplib>=3.0,<4.0
+aiosmtplib>=5.1.1,<6.0
 
 # Transitive dependencies pinned explicitly to pull in security fixes.
 # urllib3: >=2.6.3 fixes GHSA-gm62 (unbounded link chain), GHSA-2xpw (streaming decompression), GHSA-38jv (decompression-bomb on redirect);
