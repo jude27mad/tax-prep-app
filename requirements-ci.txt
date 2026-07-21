@@ -30,7 +30,7 @@ mypy_extensions==1.1.0
 packaging==25.0
 pathspec==1.1.0
 pdf2image==1.17.0
-pillow==12.2.0
+pillow==12.3.0
 playwright==1.58.0
 pluggy==1.6.0
 pycparser==2.23
