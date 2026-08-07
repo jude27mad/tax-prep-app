@@ -1,0 +1,9 @@
+target-version = "py312"
+
+[lint]
+# Pin explicitly to Ruff's historical no-config default (E4, E7, E9, F).
+# Ruff 0.16 changed what it enables when no config file is present, which
+# turned a routine dependency bump into a 300+ finding wall across the
+# codebase. Pinning here keeps `ruff check .` behavior stable across
+# Ruff upgrades; broaden deliberately, not as a side effect of a bump.
+select = ["E4", "E7", "E9", "F"]

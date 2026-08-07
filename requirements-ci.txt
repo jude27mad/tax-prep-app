@@ -35,7 +35,7 @@ playwright==1.61.0
 pluggy==1.6.0
 pycparser==2.23
 pydantic==2.13.4
-pydantic_core==2.47.0
+pydantic_core==2.46.4
 Mako==1.3.12
 alembic==1.18.5
 aiosqlite==0.22.1
