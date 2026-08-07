@@ -253,6 +253,28 @@ def test_t183_consent_page_includes_masked_sin(tmp_path, monkeypatch):
     assert "retain them for 6 years" in body
 
 
+def test_return_draft_is_encrypted_at_rest(tmp_path, monkeypatch):
+    # Regression test for CWE-312: the draft (which carries the taxpayer's
+    # SIN, per _merge_return_form_state) must never land on disk as
+    # plaintext JSON.
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    _configure_crypto(monkeypatch)
+    profiles.save_profile_data("tester", {}, user_id=TEST_USER_ID)
+    _seed_return_draft("tester")
+
+    draft_path = ui_router_module._profile_draft_path("tester", user_id=TEST_USER_ID)
+    assert draft_path.exists()
+    assert draft_path.name == "draft.enc"
+
+    raw = draft_path.read_bytes()
+    assert b"046454286" not in raw  # the seeded SIN, plaintext
+    assert b"{" not in raw  # not readable JSON at all
+
+    state, _, _, has_state = ui_router_module._load_return_draft("tester", user_id=TEST_USER_ID)
+    assert has_state
+    assert state["taxpayer"]["sin"] == "046454286"
+
+
 def test_t183_consent_submission_stores_record(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
     _configure_crypto(monkeypatch)
