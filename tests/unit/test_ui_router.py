@@ -50,6 +50,12 @@ def _configure_profiles_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(ui_router_module, "BASE_DIR", base)
     monkeypatch.setattr(wizard, "BASE_DIR", base)
 
+    # PROFILE_DRAFTS_ROOT is computed once at import time (BASE_DIR / "profiles")
+    # and stored as its own module attribute, so patching BASE_DIR above doesn't
+    # retroactively update it — without this, autosave drafts leak into the real
+    # app/profiles/ directory instead of tmp_path.
+    monkeypatch.setattr(ui_router_module, "PROFILE_DRAFTS_ROOT", profiles_dir)
+
     return base
 
 
