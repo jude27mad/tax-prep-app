@@ -8,15 +8,16 @@ httpx>=0.27,<1.0
 anyio>=4.14.2,<5.0
 # python-dotenv: >=1.2.2 fixes GHSA-mf9w (Symlink following in set_key).
 python-dotenv>=1.2.2,<2.0
-reportlab>=4.2,<5.0
+reportlab>=5.0.0,<6.0
 # pytest: >=9.0.3 fixes GHSA-6w46 (vulnerable tmpdir handling). Major-version bump from 8.x.
 pytest>=9.1.1,<10.0
 pytest-asyncio>=1.4.0,<2.0
 ruff>=0.16.0,<1.0
-mypy>=1.11,<2.0
+mypy>=2.3.0,<3.0
 xmlschema>=4.3.2,<5.0
-# cryptography: >=46.0.5 fixes GHSA-r6ph (SECT curves subgroup attack), >=46.0.6 fixes GHSA-m959 (DNS name constraint). Major bump from 43.x.
-cryptography>=46.0.6,<47.0
+# cryptography: >=46.0.5 fixes GHSA-r6ph (SECT curves subgroup attack), >=46.0.6 fixes GHSA-m959 (DNS name constraint);
+# >=48.0.1 fixes GHSA-537c-gmf6-5ccf (vulnerable statically-linked OpenSSL in the PyPI wheels). Major bump from 46.x.
+cryptography>=50.0.0,<51.0
 hypothesis>=6.163.0,<7.0
 jinja2>=3.1,<4.0
 rich>=13.7,<14.0
@@ -38,7 +39,9 @@ itsdangerous>=2.2,<3.0
 
 # D1.7: SMTP transport for magic-link emails. Async submission so the
 # auth request handler doesn't block the event loop on slow MTAs.
-aiosmtplib>=3.0,<4.0
+# >=5.1.1 fixes GHSA-v3q9-hj7j-63hq / CVE-2026-53533 (SMTP command injection via
+# CR/LF in the sender/recipient address — reachable from the magic-link email form field). Major bump from 3.x.
+aiosmtplib>=5.1.1,<6.0
 
 # Transitive dependencies pinned explicitly to pull in security fixes.
 # urllib3: >=2.6.3 fixes GHSA-gm62 (unbounded link chain), GHSA-2xpw (streaming decompression), GHSA-38jv (decompression-bomb on redirect);
