@@ -23,6 +23,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
+from app.paths import resolve_within
+
 from .estimator import round_cents
 from .fields import (
     CLI_BOOL_FIELDS,
@@ -52,8 +54,11 @@ def _user_root(user_id: str | None) -> Path:
     # Per-user scoping carves out ``profiles/<user_id>/`` so two authenticated
     # users cannot see each other's drafts even if they guess a slug. The
     # ``None`` branch keeps the pre-D1.6 global layout for CLI + legacy tests.
+    # ``user_id`` is always a server-generated UUID (see app/db/auth.py), so
+    # this should never actually reject anything in practice — it's a
+    # defense-in-depth backstop, not input normalization.
     if user_id:
-        return PROFILES_DIR / "users" / user_id
+        return resolve_within(PROFILES_DIR, "users", user_id)
     return PROFILES_DIR
 
 
@@ -64,11 +69,14 @@ def _ensure_profiles_dirs(user_id: str | None = None) -> None:
 
 
 def _profile_path(slug: str, user_id: str | None = None) -> Path:
-    return _user_root(user_id) / f"{slug}.toml"
+    # slugify() is idempotent, so re-applying it here is a no-op for callers
+    # that already sanitized (the common case) and a hard backstop for any
+    # that didn't — the resulting path can never leave _user_root().
+    return resolve_within(_user_root(user_id), f"{slugify(slug)}.toml")
 
 
 def _history_dir(slug: str, user_id: str | None = None) -> Path:
-    return _user_root(user_id) / "history" / slug
+    return resolve_within(_user_root(user_id), "history", slugify(slug))
 
 
 def _trash_dir(user_id: str | None = None) -> Path:
@@ -122,7 +130,7 @@ def _trash_profile(slug: str, path: Path, user_id: str | None = None) -> Path | 
     trash = _trash_dir(user_id)
     trash.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    dest = trash / f"{slug}-{timestamp}.toml"
+    dest = resolve_within(trash, f"{slugify(slug)}-{timestamp}.toml")
     path.replace(dest)
     return dest
 

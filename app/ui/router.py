@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.auth import require_user_web
 from app.config import Settings, get_settings
+from app.paths import PathTraversalError, resolve_within
 from app.web_security import csrf_input_global, csrf_token_global
 from app.core.models import ReturnInput
 from app.db import UserRow
@@ -151,10 +152,9 @@ async def set_locale(code: str, request: Request) -> RedirectResponse:
 
 @router.get("/static/{path:path}", name="ui_static")
 async def serve_ui_static(path: str) -> FileResponse:
-    target_path = (STATIC_ROOT / path).resolve()
     try:
-        target_path.relative_to(STATIC_ROOT.resolve())
-    except ValueError as exc:
+        target_path = resolve_within(STATIC_ROOT, path)
+    except PathTraversalError as exc:
         raise HTTPException(status_code=404, detail="Static asset not found") from exc
     if not target_path.is_file():
         raise HTTPException(status_code=404, detail="Static asset not found")
@@ -429,10 +429,13 @@ def _profile_draft_dir(slug: str, *, user_id: str | None = None) -> Path:
     # Autosave drafts piggy-back on the per-user profile directory introduced
     # in D1.6 so two authenticated users can edit the same slug concurrently
     # without clobbering each other's in-progress state. ``user_id=None`` keeps
-    # the pre-auth layout for CLI + legacy tests.
+    # the pre-auth layout for CLI + legacy tests. Callers already slugify()
+    # before reaching here, but resolve_within() re-normalizes and hard-fails
+    # if a path would ever land outside PROFILE_DRAFTS_ROOT.
+    safe_slug = slugify(slug)
     if user_id:
-        return (PROFILE_DRAFTS_ROOT / "users" / user_id / slug).resolve()
-    return (PROFILE_DRAFTS_ROOT / slug).resolve()
+        return resolve_within(PROFILE_DRAFTS_ROOT, "users", user_id, safe_slug)
+    return resolve_within(PROFILE_DRAFTS_ROOT, safe_slug)
 
 
 def _profile_draft_path(slug: str, *, user_id: str | None = None) -> Path:
@@ -1507,14 +1510,9 @@ def download_artifact(request: Request, path: str) -> FileResponse:
     if not path:
         raise HTTPException(status_code=400, detail="Missing artifact path")
     root = _resolve_artifact_root(request)
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = (root / candidate).resolve()
-    else:
-        candidate = candidate.resolve()
     try:
-        candidate.relative_to(root)
-    except ValueError as exc:
+        candidate = resolve_within(root, path)
+    except PathTraversalError as exc:
         raise HTTPException(status_code=404, detail="Artifact not found") from exc
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="Artifact not found")

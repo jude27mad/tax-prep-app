@@ -35,6 +35,11 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
 
     from app.api import http as api_http
 
+    # print_t1's out_path containment check calls get_settings() directly
+    # (matching app.printout.t1_render's own lookup) rather than app.state,
+    # so it needs patching too even though this test never triggers lifespan.
+    monkeypatch.setattr(api_http, "get_settings", lambda: settings)
+
     digest_value = "deadbeefcafebabe"
     sbmt_ref_id_value = "R1234567"
 
@@ -101,7 +106,9 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
     assert prepare_body["ok"] is True
     assert "calc" in prepare_body
 
-    pdf_path = tmp_path / "return.pdf"
+    # out_path must resolve within artifact_root — the endpoint has no auth
+    # guard, so it no longer honors an arbitrary absolute filesystem path.
+    pdf_path = Path(settings.artifact_root) / "return.pdf"
     print_payload = {**payload, "out_path": str(pdf_path)}
     print_response = client.post("/printout/t1", json=print_payload)
     assert print_response.status_code == 200
@@ -123,6 +130,32 @@ def test_prepare_print_and_efile_flow(tmp_path, monkeypatch):
     download_response = client.get("/ui/artifacts/download", params={"path": artifact_entry["path"]})
     assert download_response.status_code == 200
     assert download_response.content.startswith(b"<xml")
+
+
+def test_print_t1_rejects_out_path_outside_artifact_root(tmp_path, monkeypatch):
+    # /printout/t1 has no auth guard, so out_path is untrusted network input.
+    # Regression test for the path-injection fix: a caller must not be able
+    # to dictate an arbitrary filesystem write location (CWE-22).
+    settings = _configure_settings(tmp_path)
+    api_app.state.settings = settings
+    api_app.state.artifact_root = Path(settings.artifact_root)
+    api_app.state.daily_summary_root = Path(settings.daily_summary_root)
+    api_app.state.submission_digests = set()
+    api_app.state.summary_index = {}
+
+    from app.api import http as api_http
+
+    monkeypatch.setattr(api_http, "get_settings", lambda: settings)
+
+    client = TestClient(api_app)
+    payload = make_min_input(tax_year=2024).model_dump(mode="json")
+
+    escape_path = tmp_path / "outside" / "return.pdf"
+    print_payload = {**payload, "out_path": str(escape_path)}
+    response = client.post("/printout/t1", json=print_payload)
+
+    assert response.status_code == 400
+    assert not escape_path.exists()
 
 
 def test_prepare_efile_window_closed(tmp_path):
