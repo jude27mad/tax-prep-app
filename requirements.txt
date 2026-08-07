@@ -13,7 +13,7 @@ reportlab>=4.2,<5.0
 pytest>=9.0.3,<10.0
 pytest-asyncio>=1.3.0,<2.0
 ruff>=0.6,<1.0
-mypy>=1.11,<2.0
+mypy>=2.3.0,<3.0
 xmlschema>=1.11,<5.0
 # cryptography: >=46.0.5 fixes GHSA-r6ph (SECT curves subgroup attack), >=46.0.6 fixes GHSA-m959 (DNS name constraint);
 # >=48.0.1 fixes GHSA-537c-gmf6-5ccf (vulnerable statically-linked OpenSSL in the PyPI wheels). Major bump from 46.x.
