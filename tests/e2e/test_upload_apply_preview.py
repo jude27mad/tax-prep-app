@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Coroutine, Iterator
 from dataclasses import dataclass
 import importlib
 import os
@@ -82,6 +82,39 @@ def _reserve_port(host: str = "127.0.0.1") -> int:
         return sock.getsockname()[1]
 
 
+def _run_async(coro: Coroutine[Any, Any, Any]) -> None:
+    """Run *coro* to completion even if this thread already has a running
+    event loop.
+
+    ``ui_server`` is a plain sync generator fixture bridging into async
+    SQLAlchemy setup/teardown via ``asyncio.run()``. That's fine as long as
+    no loop is active on this thread — but the pytest-playwright plugin
+    fixtures this test depends on aren't guaranteed to leave the main
+    thread loop-free by the time session teardown runs, and `asyncio.run()`
+    raises instead of nesting. Fall back to a dedicated thread with its own
+    fresh loop in that case.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(coro)
+        return
+
+    errors: list[BaseException] = []
+
+    def _worker() -> None:
+        try:
+            asyncio.run(coro)
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the caller's thread below
+            errors.append(exc)
+
+    worker = threading.Thread(target=_worker)
+    worker.start()
+    worker.join()
+    if errors:
+        raise errors[0]
+
+
 @pytest.fixture(scope="session")
 def sample_t4_slip_path() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "sample_t4_slip.txt"
@@ -158,7 +191,7 @@ def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[UIServerCont
             async with test_db_engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
-        asyncio.run(_init_db())
+        _run_async(_init_db())
         test_session_factory = create_session_factory(test_db_engine)
 
         async def _seed_user() -> None:
@@ -166,7 +199,7 @@ def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[UIServerCont
                 session.add(UserRow(id=TEST_USER_ID, email=TEST_USER_EMAIL))
                 await session.commit()
 
-        asyncio.run(_seed_user())
+        _run_async(_seed_user())
 
         email_backend = RecordingEmailBackend()
 
@@ -231,7 +264,7 @@ def ui_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[UIServerCont
         slip_ingest.BASE_DIR = original_slip_ingest_base
         slip_ingest._DEFAULT_STORE = original_default_store  # type: ignore[attr-defined]
         if test_db_engine is not None:
-            asyncio.run(test_db_engine.dispose())
+            _run_async(test_db_engine.dispose())
         get_settings.cache_clear()
 
 
