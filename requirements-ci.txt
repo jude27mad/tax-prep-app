@@ -8,7 +8,7 @@ cffi==2.0.0
 charset-normalizer==3.4.3
 click==8.2.1
 colorama==0.4.6
-cryptography==48.0.1
+cryptography==50.0.0
 elementpath==5.1.1
 fastapi==0.136.0
 greenlet==3.4.0
