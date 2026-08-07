@@ -24,7 +24,7 @@ rich>=13.7,<14.0
 pytesseract>=0.3.10,<0.4
 pdf2image>=1.17,<2.0
 # pillow: >=12.1.1 fixes GHSA-cfh3 (OOB write on PSD), >=12.2.0 fixes GHSA-whj4 (FITS GZIP decompression bomb). Major bump from 10.x.
-pillow>=12.2.0,<13.0
+pillow>=12.3.0,<13.0
 playwright>=1.47,<2.0
 pytest-playwright>=0.7.2,<1.0
 
