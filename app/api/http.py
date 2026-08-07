@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException
 
@@ -6,6 +7,7 @@ from app.lifespan import build_application_lifespan
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
+from app.paths import PathTraversalError, resolve_within
 from app.efile.service import (
     PrefileValidationError,
     pii_safe_context,
@@ -113,7 +115,23 @@ def prepare(req: PrepareRequest):
 @app.post("/printout/t1")
 def print_t1(req: PrintRequest):
     calc = _compute_for_year(req)
-    path = render_t1_pdf(req.out_path, req, calc)
+    # Matches app.printout.t1_render's own settings lookup so the
+    # containment check below and render_t1_pdf's internal resolution
+    # always agree on the same artifact_root.
+    settings = get_settings()
+    artifact_root = Path(settings.artifact_root)
+    if not artifact_root.is_absolute():
+        artifact_root = Path.cwd() / artifact_root
+    # This endpoint has no auth guard, so out_path is untrusted network
+    # input — pin it under artifact_root instead of letting callers dictate
+    # an arbitrary filesystem write location (CWE-22).
+    try:
+        safe_out_path = resolve_within(artifact_root, req.out_path)
+    except PathTraversalError as exc:
+        raise HTTPException(
+            status_code=400, detail="out_path must resolve within the artifact root"
+        ) from exc
+    path = render_t1_pdf(str(safe_out_path), req, calc)
     return {"pdf": path}
 
 
