@@ -3,6 +3,12 @@ on:
   push: { branches: [ main ] }
   pull_request:
 
+# Neither job pushes commits, comments on PRs, or publishes packages — both
+# just checkout and run tests/scripts inside the runner. Pin GITHUB_TOKEN to
+# read-only so a compromised dependency can't use it for anything else.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

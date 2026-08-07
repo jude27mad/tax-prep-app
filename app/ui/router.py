@@ -28,6 +28,7 @@ from app.i18n import (
     translate,
 )
 from app.core.validate.pre_submit import validate_return_input
+from app.efile import crypto
 from app.efile.gating import build_transmit_gate
 from app.efile.t183 import RETENTION_YEARS, build_record, mask_sin, store_signed
 from app.ui import slip_ingest
@@ -439,7 +440,9 @@ def _profile_draft_dir(slug: str, *, user_id: str | None = None) -> Path:
 
 
 def _profile_draft_path(slug: str, *, user_id: str | None = None) -> Path:
-    return _profile_draft_dir(slug, user_id=user_id) / "draft.json"
+    # ".enc" — the file holds a Fernet-encrypted blob, not readable JSON.
+    # See _save_return_draft/_load_return_draft.
+    return _profile_draft_dir(slug, user_id=user_id) / "draft.enc"
 
 
 def _coerce_text(value: Any) -> str:
@@ -517,8 +520,8 @@ def _load_return_draft(
     if not path.exists():
         return {}, None, None, False
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw = json.loads(crypto.decrypt(path.read_bytes()))
+    except (OSError, json.JSONDecodeError, crypto.EncryptionError):
         return {}, None, None, False
     state_data = raw.get("state") or raw.get("form_state")
     state: dict[str, Any] = {}
@@ -547,7 +550,11 @@ def _save_return_draft(
         "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
     path = _profile_draft_path(slug, user_id=user_id)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    # Drafts hold the in-progress return, including the taxpayer/spouse SIN
+    # (app.ui.router._merge_return_form_state), so they're encrypted at rest
+    # with the same T183_CRYPTO_KEY used for signed T183 records rather than
+    # written as plaintext JSON (CWE-312).
+    path.write_bytes(crypto.encrypt(json.dumps(payload, indent=2).encode("utf-8")))
 
 
 class ReturnAutosavePayload(BaseModel):
