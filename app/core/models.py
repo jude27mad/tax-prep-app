@@ -152,9 +152,21 @@ class ReturnInput(BaseModel):
 
 
 class ReturnCalc(BaseModel):
+    """Deterministic output of a return computation.
+
+    ``line_items`` holds the T1 lines proper (see :mod:`app.core.lines` for the
+    canonical keys and their CRA line numbers). ``provincial_additions`` holds
+    province-specific amounts added on top of provincial tax — Ontario surtax and
+    health premium today — and is a **separate field on purpose**: consumers used
+    to identify additions as "any ``line_items`` key I don't recognise", which
+    silently reclassified every new line as a provincial addition. Additions are
+    declared, not inferred.
+    """
+
     tax_year: int
     province: str
     line_items: dict[str, Decimal]
     totals: dict[str, Decimal]
     cpp: dict[str, Decimal]
     ei: dict[str, Decimal]
+    provincial_additions: dict[str, Decimal] = Field(default_factory=dict)

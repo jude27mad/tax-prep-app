@@ -38,6 +38,8 @@ IDENTITY_COORDS = {
 
 LINE_ITEM_ROWS = (
     ("income_total", "Total income"),
+    ("total_deductions", "Deductions"),
+    ("net_income", "Net income"),
     ("taxable_income", "Taxable income"),
     ("federal_tax", "Federal tax"),
     ("prov_tax", "Provincial tax"),
@@ -187,10 +189,11 @@ def _draw_line_items(pdf: canvas.Canvas, calc: ReturnCalc) -> None:
         pdf.drawRightString(value_x, y, _format_currency(amount))
         y -= LINE_HEIGHT
 
+    # Provincial additions come from their own declared field. They used to be
+    # inferred as "any line_items key not in LINE_ITEM_ROWS", which meant every
+    # newly added T1 line was silently printed as a provincial addition.
     additions = [
-        (key, value)
-        for key, value in calc.line_items.items()
-        if key not in {k for k, _ in LINE_ITEM_ROWS}
+        (key, value) for key, value in calc.provincial_additions.items() if value is not None
     ]
     if additions:
         pdf.setFont(SMALL_FONT, 9)

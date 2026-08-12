@@ -51,14 +51,17 @@ def _make_calc() -> ReturnCalc:
         province="ON",
         line_items={
             "income_total": Decimal("75000.00"),
+            "total_deductions": Decimal("5000.00"),
+            "net_income": Decimal("70000.00"),
             "taxable_income": Decimal("70000.00"),
             "federal_tax": Decimal("15000.00"),
             "prov_tax": Decimal("6000.00"),
-            "ontario_surtax": Decimal("500.00"),
         },
         totals={"net_tax": Decimal("21000.00")},
         cpp={"employee": Decimal("2898.00")},
         ei={"employee": Decimal("889.54")},
+        # Declared, not inferred from leftover line_items keys.
+        provincial_additions={"ontario_surtax": Decimal("500.00")},
     )
 
 

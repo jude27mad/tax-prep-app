@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Mapping
 
+from app.core.lines import compute_income_lines
 from app.core.models import ReturnCalc, ReturnInput
 from app.core.slips import (
     sum_rrsp_contributions,
@@ -66,19 +67,27 @@ def compute_return(in_: ReturnInput) -> ReturnCalc:
     t5_income = sum_t5_income(in_.slips_t5)
     total_income = employment_income + t4a_income + t5_income
     rrsp_deductions = in_.rrsp_contrib + sum_rrsp_contributions(in_.rrsp_receipts)
-    taxable_income = total_income - rrsp_deductions
-    breakdown = compute_full_2024(taxable_income, total_income, province=in_.province)
+
+    # See app.core.lines: net income (not total income) drives income-tested
+    # amounts such as the BPA phase-out.
+    lines = compute_income_lines(
+        total_income=total_income,
+        division_b_deductions=rrsp_deductions,
+    )
+
+    breakdown = compute_full_2024(
+        lines.taxable_income,
+        lines.net_income,
+        province=in_.province,
+    )
     cpp = t4mod.compute_cpp_2024(in_.slips_t4)
     ei = t4mod.compute_ei_2024(in_.slips_t4)
 
     line_items = {
-        "income_total": total_income,
-        "taxable_income": taxable_income,
+        **lines.as_line_items(),
         "federal_tax": breakdown.federal_tax,
         "prov_tax": breakdown.provincial_tax,
     }
-    if breakdown.provincial_additions:
-        line_items.update(breakdown.provincial_additions)
     totals = {
         "net_tax": breakdown.total_payable,
     }
@@ -90,4 +99,5 @@ def compute_return(in_: ReturnInput) -> ReturnCalc:
         totals=totals,
         cpp=cpp,
         ei=ei,
+        provincial_additions=dict(breakdown.provincial_additions),
     )
