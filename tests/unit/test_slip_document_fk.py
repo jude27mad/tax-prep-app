@@ -34,10 +34,13 @@ from sqlalchemy.pool import StaticPool
 from app.core.models import (
     DeductionCreditInputs,
     Household,
+    RC210Slip,
     RRSPReceipt,
     ReturnInput,
     T4ASlip,
+    T4ESlip,
     T4Slip,
+    T5007Slip,
     T5Slip,
     Taxpayer,
     TuitionSlip,
@@ -91,6 +94,9 @@ def test_t4_slip_document_id_defaults_to_none() -> None:
     [
         (T4ASlip, {"pension_income": Decimal("500.00")}),
         (T5Slip, {"interest_income": Decimal("100.00")}),
+        (T4ESlip, {"benefits_paid": Decimal("500.00")}),
+        (T5007Slip, {"social_assistance": Decimal("1000.00")}),
+        (RC210Slip, {"advance_cwb_payments": Decimal("200.00")}),
         (TuitionSlip, {"institution_name": "Uni", "eligible_tuition": Decimal("1000")}),
         (RRSPReceipt, {"contribution_amount": Decimal("250.00")}),
     ],

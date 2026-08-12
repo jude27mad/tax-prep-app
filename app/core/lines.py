@@ -46,6 +46,12 @@ CRA_LINE_NUMBERS: dict[str, str] = {
     "income_total": "15000",
     "total_deductions": "23300",
     "net_income": "23600",
+    # Line 25000, "Other payments deduction": today the sole Division C
+    # deduction this field carries is the T5007 workers' compensation/social
+    # assistance offset (see app.core.slips.sum_t5007_offset). If a second
+    # Division C deduction is ever modelled, this single field/line pairing
+    # will need to split.
+    "division_c_deductions": "25000",
     "taxable_income": "26000",
     "federal_tax": "42000",
     "prov_tax": "42800",
@@ -84,6 +90,7 @@ class IncomeLines:
             "income_total": self.total_income,
             "total_deductions": self.total_deductions,
             "net_income": self.net_income,
+            "division_c_deductions": self.division_c_deductions,
             "taxable_income": self.taxable_income,
         }
 

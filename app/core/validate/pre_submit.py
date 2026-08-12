@@ -154,6 +154,21 @@ ISSUE_RRSP_NEGATIVE = IssueTemplate(
     "30011",
     "RRSP contributions claimed must be zero or positive.",
 )
+ISSUE_T4E_NEGATIVE_AMOUNT = IssueTemplate(
+    "t4e_negative_amount",
+    "60019",
+    "T4E slip amounts must be zero or positive.",
+)
+ISSUE_T5007_NEGATIVE_AMOUNT = IssueTemplate(
+    "t5007_negative_amount",
+    "60020",
+    "T5007 slip amounts must be zero or positive.",
+)
+ISSUE_RC210_NEGATIVE_AMOUNT = IssueTemplate(
+    "rc210_negative_amount",
+    "62010",
+    "RC210 advance CWB amount must be zero or positive.",
+)
 
 
 def _validate_postal_code(value: str) -> bool:
@@ -333,6 +348,32 @@ def _validate_t5_slips(slips: list[Any], emit, *, collection: str = "slips_t5", 
             emit(ISSUE_T5_MISSING_AMOUNT, _field_path(collection, index))
 
 
+def _validate_t4e_slips(slips: list[Any], emit, *, collection: str = "slips_t4e") -> None:
+    for index, slip in enumerate(slips):
+        for field in ("benefits_paid", "tax_deducted"):
+            value = _to_decimal(_get_value(slip, field))
+            if value is not None and value < 0:
+                emit(ISSUE_T4E_NEGATIVE_AMOUNT, _field_path(collection, index, field))
+
+
+def _validate_t5007_slips(slips: list[Any], emit, *, collection: str = "slips_t5007") -> None:
+    for index, slip in enumerate(slips):
+        for field in ("workers_compensation", "social_assistance"):
+            value = _to_decimal(_get_value(slip, field))
+            if value is not None and value < 0:
+                emit(ISSUE_T5007_NEGATIVE_AMOUNT, _field_path(collection, index, field))
+
+
+def _validate_rc210_slips(slips: list[Any], emit, *, collection: str = "slips_rc210") -> None:
+    for index, slip in enumerate(slips):
+        value = _to_decimal(_get_value(slip, "advance_cwb_payments"))
+        if value is not None and value < 0:
+            emit(
+                ISSUE_RC210_NEGATIVE_AMOUNT,
+                _field_path(collection, index, "advance_cwb_payments"),
+            )
+
+
 def _validate_tuition_slips(slips: list[Any], emit, *, collection: str = "tuition_slips") -> Decimal:
     total = Decimal("0")
     for index, slip in enumerate(slips):
@@ -427,6 +468,12 @@ def validate_before_efile(identity: Identity, return_payload: dict) -> list[Vali
     _validate_t4a_slips(slips_t4a, emit, reported_count=_to_int(return_payload.get("slips_t4a_count")))
     slips_t5 = _as_list(return_payload.get("slips_t5"))
     _validate_t5_slips(slips_t5, emit, reported_count=_to_int(return_payload.get("slips_t5_count")))
+    slips_t4e = _as_list(return_payload.get("slips_t4e"))
+    _validate_t4e_slips(slips_t4e, emit)
+    slips_t5007 = _as_list(return_payload.get("slips_t5007"))
+    _validate_t5007_slips(slips_t5007, emit)
+    slips_rc210 = _as_list(return_payload.get("slips_rc210"))
+    _validate_rc210_slips(slips_rc210, emit)
     tuition_slips = _as_list(return_payload.get("tuition_slips"))
     tuition_total = _validate_tuition_slips(tuition_slips, emit)
     _validate_tuition_claims(
@@ -465,6 +512,9 @@ def validate_return_input(in_: ReturnInput) -> list[str]:
     _validate_t4_slips(in_.slips_t4, emit)
     _validate_t4a_slips(in_.slips_t4a, emit)
     _validate_t5_slips(in_.slips_t5, emit)
+    _validate_t4e_slips(in_.slips_t4e, emit)
+    _validate_t5007_slips(in_.slips_t5007, emit)
+    _validate_rc210_slips(in_.slips_rc210, emit)
     tuition_total = _validate_tuition_slips(in_.tuition_slips, emit)
     _validate_tuition_claims(tuition_total, in_.tuition_claim, in_.tuition_transfer_to_spouse, emit)
     _validate_rrsp_amount(in_.rrsp_contrib, emit)
