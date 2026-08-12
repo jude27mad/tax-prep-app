@@ -1,5 +1,18 @@
 # Plan V3 Product Foundation
 
+> **Filing-channel correction.** This document was written before the
+> NETFILE/EFILE distinction was resolved, and it describes the repo's
+> EFILE-shaped filing stack as though that defined the product's filing path. It
+> does not. Tax_App is consumer-first, so **the consumer filing path is NETFILE**;
+> EFILE is the preparer channel, retained for a future B2B product. Sections 2 and
+> 3 below have been annotated accordingly.
+>
+> Read [`filing_channels.md`](filing_channels.md) first. It also carries the
+> **NO CRA PROTOCOL ASSUMPTIONS** rule: nothing about the NETFILE transmission
+> format, authentication fields, certification procedure, credentials, or service
+> limits may be inferred from the EFILE code — it stays behind an interface, marked
+> `[PENDING CRA]`, until official CRA developer material is obtained.
+
 ## 1. Product thesis
 
 Plan V3 makes Tax App a deterministic Canadian tax filing engine with a guided
@@ -33,7 +46,12 @@ recommend a safe path, and explain how the user can verify afterward.
 
 ## 2. Current repo foundation
 
-The repository already has a substantial filing foundation:
+The repository already has a substantial filing foundation. **Note:** the
+inventory below is an accurate description of what exists, but what exists is
+EFILE-shaped. It describes the preparer channel, not the consumer NETFILE path
+the product needs — see [`filing_channels.md`](filing_channels.md) §4 for the
+three pieces that are on the wrong channel (the T619 envelope wrapping T1, the
+T183 stack, and the placeholder XSDs).
 
 - `README.md` describes the Tax App as a CRA-focused toolkit for estimating
   personal income tax, preparing T1 returns, and assembling/validating EFILE XML
@@ -82,6 +100,12 @@ Plan V3 should extend these existing surfaces instead of bypassing them. New
 explainability, confidence, ledger, TeeFoor, and evidence features should be
 thin layers around deterministic state and artifacts, not parallel tax engines.
 
+**One exception to "extend, don't replace":** the transmission layer. Because it
+is EFILE-shaped and the NETFILE format is unknown, it is generalized behind a
+filing-channel interface rather than extended in place. Everything above that
+interface — engine, explanation, confidence, ledger, evidence, UX — is unaffected
+by the channel and must not depend on transmission details.
+
 ## 3. Tax engine vs TeeFoor separation
 
 The tax engine is the source of truth.
@@ -91,7 +115,9 @@ The app owns deterministic work:
 - collect and normalize user input;
 - validate return readiness;
 - calculate tax, credits, deductions, balances, and filing readiness;
-- generate printouts, XML, T183/T619 artifacts, and evidence packs;
+- generate printouts, channel-appropriate filing artifacts, and evidence packs
+  (for the consumer NETFILE path the filing payload format is `[PENDING CRA]`;
+  T183/T619 artifacts belong to the preparer EFILE channel);
 - stage, apply, clear, or retain documents;
 - connect to CRA services;
 - transmit returns only through explicit product flows controlled by the user.
@@ -120,9 +146,14 @@ questions:
 
 Guided Confidence should be state-aware and action-aware. It should prefer
 specific next steps over generic advice. For example, if a return cannot proceed
-because T183 consent is missing, the app should identify that condition, show
-the consent action, explain why it is required, and describe the post-consent
-verification signal.
+because a required slip amount is still unconfirmed, the app should identify that
+condition, show the confirm action, explain why it is required, and describe the
+verification signal the user should expect afterward.
+
+(The original example here used missing T183 consent. That is an EFILE/preparer
+condition and cannot arise on the consumer NETFILE path — see
+[`filing_channels.md`](filing_channels.md). Consumer blocking conditions come from
+unconfirmed inputs, unresolved CRA-vs-user reconciliation, and exclusion gates.)
 
 Guided Confidence primitives should be deterministic data structures that can be
 rendered in web, mobile, CLI, API, and TeeFoor contexts. The product may vary
@@ -152,7 +183,8 @@ TeeFoor cannot:
 - connect to CRA;
 - pull files from CRA or any external account;
 - apply credits automatically;
-- sign T183;
+- sign or consent to any filing authorization (T183 on the preparer channel; the
+  individual's own NETFILE authentication on the consumer channel);
 - transmit anything;
 - remember private tax context after the session ends.
 
