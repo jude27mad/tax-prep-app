@@ -27,6 +27,12 @@ def build_records(env: EfileEnvelope, in_: ReturnInput, calc: ReturnCalc) -> dic
       "year": calc.tax_year,
       "province": calc.province,
       "line_items": calc.line_items,
+      # provincial_additions (Ontario surtax, health premium, etc.) is a
+      # separate field on ReturnCalc, not folded into line_items -- see
+      # app/core/models.py. Serialize it explicitly here too, or it silently
+      # disappears from every legacy JSON payload while still being counted
+      # inside totals["net_tax"].
+      "provincial_additions": calc.provincial_additions,
       "totals": calc.totals,
     },
   }

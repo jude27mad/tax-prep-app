@@ -118,6 +118,71 @@ def test_missing_dependencies_is_deterministic_integrity_check():
     assert explanation.item_ids() == ["taxable_income"]
 
 
+def test_duplicate_item_ids_are_rejected():
+    with pytest.raises(ValidationError):
+        ReturnExplanation(
+            tax_year=2025,
+            province="ON",
+            items=[
+                ExplanationItem(id="income_total", title="A", summary="first"),
+                ExplanationItem(id="income_total", title="B", summary="second"),
+            ],
+        )
+
+
+def test_duplicate_item_id_is_named_in_the_error():
+    # The error must identify which id collided, not just that a collision
+    # happened -- and must not implicate ids that were actually unique.
+    with pytest.raises(ValidationError) as exc_info:
+        ReturnExplanation(
+            tax_year=2025,
+            province="ON",
+            items=[
+                ExplanationItem(id="dup", title="A", summary="first"),
+                ExplanationItem(id="dup", title="B", summary="second"),
+                ExplanationItem(id="only_once", title="C", summary="third"),
+            ],
+        )
+    message = str(exc_info.value)
+    assert "dup" in message
+    assert "only_once" not in message
+
+
+def test_unique_ids_construct_and_lookup_normally():
+    explanation = ReturnExplanation(
+        tax_year=2025,
+        province="ON",
+        items=[
+            ExplanationItem(id="income_total", title="Total income", summary="s"),
+            ExplanationItem(
+                id="taxable_income",
+                title="Taxable income",
+                summary="s",
+                depends_on=["income_total"],
+            ),
+        ],
+    )
+    # get() must not silently pick first/last -- with unique ids there is only
+    # ever one candidate, and it must be the right one.
+    assert explanation.get("income_total").title == "Total income"
+    assert explanation.get("taxable_income").title == "Taxable income"
+    assert explanation.item_ids() == ["income_total", "taxable_income"]
+
+
+def test_dependency_resolution_still_works_with_unique_ids():
+    explanation = ReturnExplanation(
+        tax_year=2025,
+        province="ON",
+        items=[
+            ExplanationItem(id="a", title="A", summary="s"),
+            ExplanationItem(id="b", title="B", summary="s", depends_on=["a"]),
+            ExplanationItem(id="c", title="C", summary="s", depends_on=["a", "b"]),
+        ],
+    )
+    assert explanation.missing_dependencies() == set()
+    assert explanation.get("c").depends_on == ["a", "b"]
+
+
 def test_evidence_kind_is_constrained():
     with pytest.raises(ValidationError):
         EvidenceRef(kind="not-a-real-kind", ref="x")  # type: ignore[arg-type]

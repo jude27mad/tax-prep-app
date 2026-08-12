@@ -26,7 +26,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # What kind of source backs an explained quantity. Kept symbolic (an
 # identifier, not raw private data) so explanations can cite provenance
@@ -110,12 +110,35 @@ class ReturnExplanation(BaseModel):
     province: str = Field(min_length=1)
     items: list[ExplanationItem] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _reject_duplicate_item_ids(self) -> "ReturnExplanation":
+        """Fail fast on a duplicate id rather than silently pick a winner.
+
+        ``get()`` and ``item_ids()`` assume ``id`` uniquely identifies an item.
+        Without this check, a duplicate would make ``get()`` an implicit
+        first-match lookup with the second item's data unreachable — a silent
+        data-loss bug, not a validation error. Every consumer (waterfall,
+        ledger, TeeFoor) depends on lookup-by-id being unambiguous.
+        """
+        seen: dict[str, int] = {}
+        for item in self.items:
+            seen[item.id] = seen.get(item.id, 0) + 1
+        duplicates = sorted(item_id for item_id, count in seen.items() if count > 1)
+        if duplicates:
+            raise ValueError(
+                f"ExplanationItem ids must be unique; duplicated: {duplicates}"
+            )
+        return self
+
     def item_ids(self) -> list[str]:
         """Item ids in declaration order."""
         return [item.id for item in self.items]
 
     def get(self, item_id: str) -> ExplanationItem | None:
-        """Return the item with ``item_id`` or ``None`` if absent."""
+        """Return the item with ``item_id`` or ``None`` if absent.
+
+        Safe to assume at most one match: construction rejects duplicate ids.
+        """
         for item in self.items:
             if item.id == item_id:
                 return item
