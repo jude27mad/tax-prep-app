@@ -23,6 +23,13 @@ from app.core.tax_years.y2025.federal import (
 
 D = Decimal
 
+# The only tax year this module's rules implement. compute_from_amounts always
+# runs federal_tax_2025/federal_bpa_2025/federal_nrtcs_2025 and the 2025
+# provincial calculators, so a caller-supplied tax_year that disagrees with this
+# constant would otherwise produce a TaxComputation labelled with a year whose
+# rules were never applied.
+TAX_YEAR = 2025
+
 
 @dataclass(frozen=True)
 class TaxBreakdown2025:
@@ -74,7 +81,7 @@ def compute_from_amounts(
     province: str | None = None,
     withholding: D = D("0.00"),
     division_c_deductions: D = D("0.00"),
-    tax_year: int = 2025,
+    tax_year: int = TAX_YEAR,
 ) -> TaxComputation:
     """The one 2025 tax computation, expressed over plain amounts.
 
@@ -84,7 +91,19 @@ def compute_from_amounts(
     rather than :class:`~app.core.models.ReturnInput`-shaped is what lets the
     estimator share it without fabricating taxpayer identity for a calculation
     that needs none.
+
+    ``tax_year`` is accepted only so the result can be labelled; it must equal
+    :data:`TAX_YEAR` because the arithmetic below always runs 2025 rules
+    regardless of what is passed. A caller asking for a different year would
+    otherwise get amounts computed under the wrong year's rules silently
+    labelled as that year -- see the y2024 module's identical guard.
     """
+    if tax_year != TAX_YEAR:
+        raise ValueError(
+            f"app.core.tax_years.y2025.calc computes {TAX_YEAR} rules only; "
+            f"got tax_year={tax_year}. Use app.core.tax_years.{tax_year}.calc "
+            "if it exists, or app.core.tax_years.get_compute_handler for dispatch."
+        )
     # Total income → net income → taxable income, kept as distinct lines.
     # Net income is what income-tested amounts key off (the BPA phase-out
     # today), so it is the value handed to compute_full_2025 for that purpose.

@@ -181,6 +181,21 @@ def test_computation_reconciles_on_both_years(
     assert computation.balance == computation.net_tax - computation.withholding
 
 
+@pytest.mark.parametrize(
+    ("compute_amounts", "wrong_year"), [(amounts_2025, 2024), (amounts_2024, 2025)]
+)
+def test_compute_from_amounts_rejects_a_mismatched_tax_year(compute_amounts, wrong_year):
+    """Each year module only ever runs its own rules.
+
+    A caller-supplied ``tax_year`` that disagrees with the module would
+    otherwise produce a TaxComputation whose amounts came from one year's
+    rules but was labelled as another -- silently. This must fail loudly
+    instead.
+    """
+    with pytest.raises(ValueError):
+        compute_amounts(D("50000.00"), D("0.00"), province="ON", tax_year=wrong_year)
+
+
 def test_estimator_no_longer_implements_tax_arithmetic():
     """Guard against the duplicate path creeping back.
 
