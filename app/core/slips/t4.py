@@ -17,3 +17,11 @@ def compute_ei_2024(slips: list[T4Slip]) -> dict[str, Decimal]:
     if slip.ei_premiums:
       emp += slip.ei_premiums
   return {"employee": emp}
+
+def sum_tax_deducted(slips: list[T4Slip]) -> Decimal:
+  """Total income tax withheld at source across T4 box 22 (CRA line 43700)."""
+  total = Decimal("0.00")
+  for slip in slips:
+    if slip.tax_deducted:
+      total += slip.tax_deducted
+  return total
