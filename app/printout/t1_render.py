@@ -20,6 +20,17 @@ LEFT_MARGIN = 54
 RIGHT_MARGIN = PAGE_WIDTH - LEFT_MARGIN
 LINE_HEIGHT = 16
 
+# Vertical distance from a section header's baseline to its first content row.
+HEADER_TO_ROW_GAP = 18
+# Vertical gap between the last content of one summary section and the next
+# section's header. A fixed constant, but applied *after* each section reports
+# how much vertical space it actually consumed -- see the "top_y in, next y
+# out" pattern below.
+SECTION_GAP = 24
+# Extra space above the bolded "Net tax payable" row, separating it visually
+# from the line items it totals.
+TOTAL_ROW_GAP = 8
+
 HEADER_FONT = "Helvetica-Bold"
 BODY_FONT = "Helvetica"
 SMALL_FONT = "Helvetica"
@@ -38,6 +49,8 @@ IDENTITY_COORDS = {
 
 LINE_ITEM_ROWS = (
     ("income_total", "Total income"),
+    ("total_deductions", "Deductions"),
+    ("net_income", "Net income"),
     ("taxable_income", "Taxable income"),
     ("federal_tax", "Federal tax"),
     ("prov_tax", "Provincial tax"),
@@ -170,12 +183,19 @@ def _humanize(label: str) -> str:
     return " ".join(part.capitalize() for part in parts)
 
 
-def _draw_line_items(pdf: canvas.Canvas, calc: ReturnCalc) -> None:
+def _draw_line_items(pdf: canvas.Canvas, calc: ReturnCalc, top_y: float) -> float:
+    """Draw the income/tax summary starting at ``top_y``; return the y below it.
+
+    Row count is variable -- provincial additions range from zero to several
+    entries -- so this section's height cannot be a fixed constant. Every
+    caller must position the *next* section relative to what this one actually
+    drew, not a hardcoded offset from the page top.
+    """
     pdf.setFont(HEADER_FONT, 11)
-    pdf.drawString(LEFT_MARGIN, PAGE_HEIGHT - 210, "Income and tax summary")
+    pdf.drawString(LEFT_MARGIN, top_y, "Income and tax summary")
     label_x = LEFT_MARGIN
     value_x = RIGHT_MARGIN
-    y = PAGE_HEIGHT - 228
+    y = top_y - HEADER_TO_ROW_GAP
 
     pdf.setFont(BODY_FONT, 10)
     for key, label in LINE_ITEM_ROWS:
@@ -187,10 +207,11 @@ def _draw_line_items(pdf: canvas.Canvas, calc: ReturnCalc) -> None:
         pdf.drawRightString(value_x, y, _format_currency(amount))
         y -= LINE_HEIGHT
 
+    # Provincial additions come from their own declared field. They used to be
+    # inferred as "any line_items key not in LINE_ITEM_ROWS", which meant every
+    # newly added T1 line was silently printed as a provincial addition.
     additions = [
-        (key, value)
-        for key, value in calc.line_items.items()
-        if key not in {k for k, _ in LINE_ITEM_ROWS}
+        (key, value) for key, value in calc.provincial_additions.items() if value is not None
     ]
     if additions:
         pdf.setFont(SMALL_FONT, 9)
@@ -198,25 +219,32 @@ def _draw_line_items(pdf: canvas.Canvas, calc: ReturnCalc) -> None:
         y -= LINE_HEIGHT
         pdf.setFont(BODY_FONT, 10)
         for key, value in sorted(additions):
-            if value is None:
-                continue
             pdf.drawString(label_x + 12, y, _humanize(key))
             pdf.drawRightString(value_x, y, _format_currency(value))
             y -= LINE_HEIGHT
 
     net_tax = calc.totals.get("net_tax")
     if net_tax is not None:
+        y -= TOTAL_ROW_GAP
         pdf.setFont(HEADER_FONT, 11)
-        pdf.drawString(label_x, y - LINE_HEIGHT, "Net tax payable")
+        pdf.drawString(label_x, y, "Net tax payable")
         pdf.setFont(BODY_FONT, 10)
-        pdf.drawRightString(value_x, y - LINE_HEIGHT, _format_currency(net_tax))
+        pdf.drawRightString(value_x, y, _format_currency(net_tax))
+        y -= LINE_HEIGHT
+
+    return y
 
 
-def _draw_cpp_ei(pdf: canvas.Canvas, calc: ReturnCalc) -> None:
+def _draw_cpp_ei(pdf: canvas.Canvas, calc: ReturnCalc, top_y: float) -> float:
+    """Draw CPP/EI starting at ``top_y``; return the y below it.
+
+    ``top_y`` comes from the previous section's consumed height, not a fixed
+    page offset -- see :func:`_draw_line_items`.
+    """
     pdf.setFont(HEADER_FONT, 11)
-    pdf.drawString(LEFT_MARGIN, PAGE_HEIGHT - 360, "CPP and EI")
+    pdf.drawString(LEFT_MARGIN, top_y, "CPP and EI")
     pdf.setFont(BODY_FONT, 10)
-    y = PAGE_HEIGHT - 378
+    y = top_y - HEADER_TO_ROW_GAP
     value_x = RIGHT_MARGIN
 
     cpp_employee = calc.cpp.get("employee") if calc.cpp else None
@@ -235,12 +263,15 @@ def _draw_cpp_ei(pdf: canvas.Canvas, calc: ReturnCalc) -> None:
         pdf.drawRightString(value_x, y, _format_currency(amount))
         y -= LINE_HEIGHT
 
+    return y
 
-def _draw_rrsp(pdf: canvas.Canvas, request: ReturnInput) -> None:
+
+def _draw_rrsp(pdf: canvas.Canvas, request: ReturnInput, top_y: float) -> float:
+    """Draw RRSP contributions starting at ``top_y``; return the y below it."""
     pdf.setFont(HEADER_FONT, 11)
-    pdf.drawString(LEFT_MARGIN, PAGE_HEIGHT - 438, "RRSP contributions")
+    pdf.drawString(LEFT_MARGIN, top_y, "RRSP contributions")
     pdf.setFont(BODY_FONT, 10)
-    y = PAGE_HEIGHT - 456
+    y = top_y - HEADER_TO_ROW_GAP
     value_x = RIGHT_MARGIN
 
     receipts_total = _sum_decimals(
@@ -261,6 +292,8 @@ def _draw_rrsp(pdf: canvas.Canvas, request: ReturnInput) -> None:
         pdf.drawString(LEFT_MARGIN, y, label)
         pdf.drawRightString(value_x, y, _format_currency(amount))
         y -= LINE_HEIGHT
+
+    return y
 
 
 def _draw_page_number(pdf: canvas.Canvas, total_pages: int) -> None:
@@ -291,9 +324,15 @@ def render_t1_pdf(out_path: str, request: ReturnInput, calc: ReturnCalc) -> str:
         _set_metadata(pdf, request, calc)
         _draw_headers(pdf, calc)
         _draw_identity(pdf, request)
-        _draw_line_items(pdf, calc)
-        _draw_cpp_ei(pdf, calc)
-        _draw_rrsp(pdf, request)
+
+        # Each section reports where it stopped; the next one starts SECTION_GAP
+        # below that. This is what keeps CPP/EI and RRSP from overlapping the
+        # income summary when provincial additions make it taller than usual.
+        y = PAGE_HEIGHT - 210
+        y = _draw_line_items(pdf, calc, y) - SECTION_GAP
+        y = _draw_cpp_ei(pdf, calc, y) - SECTION_GAP
+        _draw_rrsp(pdf, request, y)
+
         _draw_page_number(pdf, 1)
 
         pdf.showPage()

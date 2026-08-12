@@ -108,6 +108,19 @@ def _build_identity(req: ReturnInput) -> Identity:
 
 
 def enforce_prefile_gates(req: ReturnInput, calc: ReturnCalc) -> None:
+    """Validate a return's inputs and derived totals before transmission.
+
+    The slip collections are passed through deliberately. ``validate_before_efile``
+    validates them, but this function used to build a payload without them, so
+    every slip-level check ran against an empty list and found nothing. Bad input
+    was caught only indirectly, when it happened to drive a derived total
+    negative — and once the line architecture correctly floored net and taxable
+    income at zero (see :mod:`app.core.lines`), that accidental backstop
+    disappeared and the gap became visible.
+
+    Input problems belong to the input. A negative slip amount is rejected as a
+    negative slip amount, not inferred from an impossible total.
+    """
     issues = validate_before_efile(
         _build_identity(req),
         {
@@ -117,6 +130,13 @@ def enforce_prefile_gates(req: ReturnInput, calc: ReturnCalc) -> None:
             "t183_signed_ts": req.t183_signed_ts.isoformat() if req.t183_signed_ts else "",
             "t183_ip_hash": req.t183_ip_hash,
             "t183_user_agent_hash": req.t183_user_agent_hash,
+            "slips_t4": req.slips_t4,
+            "slips_t4a": req.slips_t4a,
+            "slips_t5": req.slips_t5,
+            "tuition_slips": req.tuition_slips,
+            "tuition_claim": req.tuition_claim,
+            "tuition_transfer_to_spouse": req.tuition_transfer_to_spouse,
+            "rrsp_contrib": req.rrsp_contrib,
         },
     )
     if issues:

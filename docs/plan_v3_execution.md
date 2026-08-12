@@ -1,5 +1,22 @@
 # Plan V3 Execution Roadmap
 
+> **Status: partially superseded.** The package placement and phase *contracts*
+> below still hold and remain the reference for `app/explain/`, `app/confidence/`,
+> `app/ledger/`, `app/teefoor/`, and `app/evidence/`. Two things have changed:
+>
+> 1. **Filing channel.** This roadmap assumes the repo's EFILE framing. The
+>    consumer filing path is **NETFILE** — read
+>    [`filing_channels.md`](filing_channels.md), including the
+>    **NO CRA PROTOCOL ASSUMPTIONS** rule.
+> 2. **Sequencing.** The phase order below was written before the calculation
+>    engine's actual state was assessed. The engine must be built out first: the
+>    explanation engine cannot meaningfully explain a `ReturnCalc` that carries
+>    four `line_items` keys and no refund line. Phases 3–11 keep their contracts
+>    but follow engine completeness, and the refund waterfall (§7) moves ahead of
+>    the API/CLI surfaces (§4/§5).
+>
+> Phase 2 (§2, explanation models) is **complete** — see `app/explain/models.py`.
+
 ## Package placement note
 
 Plan V3 packages should be top-level under `app/`:
