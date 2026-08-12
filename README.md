@@ -36,7 +36,7 @@ GitHub Repo Page 🐙 (Code tab)
 │  ├─ requirements.txt          Python dependencies
 │  ├─ user_data.example.toml    Sample estimator input
 │  └─ user_data.toml            Default estimator input
-└─ README preview 👀 (rendered below the file list)  <-- YOU ARE HERE 📍
+└─ README preview 👀 <-- YOU ARE HERE 📍
    ├─ # Tax App
    ├─ ## Components
    │  └─ ### `app/` layout
