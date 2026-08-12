@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Mapping
 
+from app.core.computation import TaxComputation
 from app.core.lines import compute_income_lines
 from app.core.models import ReturnCalc, ReturnInput
 from app.core.slips import (
@@ -14,7 +15,11 @@ from app.core.slips import (
 )
 from app.core.slips import t4 as t4mod
 from app.core.provinces import get_provincial_calculator
-from app.core.tax_years.y2025.federal import federal_nrtcs_2025, federal_tax_2025
+from app.core.tax_years.y2025.federal import (
+    federal_bpa_2025,
+    federal_nrtcs_2025,
+    federal_tax_2025,
+)
 
 D = Decimal
 
@@ -62,54 +67,95 @@ def compute_full_2025(
     )
 
 
+def compute_from_amounts(
+    total_income: D,
+    division_b_deductions: D,
+    *,
+    province: str | None = None,
+    withholding: D = D("0.00"),
+    division_c_deductions: D = D("0.00"),
+    tax_year: int = 2025,
+) -> TaxComputation:
+    """The one 2025 tax computation, expressed over plain amounts.
+
+    Every surface routes through here: :func:`compute_return` adapts slips into
+    these amounts, and :func:`app.wizard.estimator.compute_tax_summary` adapts a
+    flat income/RRSP estimate into them. Keeping the entry point amount-shaped
+    rather than :class:`~app.core.models.ReturnInput`-shaped is what lets the
+    estimator share it without fabricating taxpayer identity for a calculation
+    that needs none.
+    """
+    # Total income → net income → taxable income, kept as distinct lines.
+    # Net income is what income-tested amounts key off (the BPA phase-out
+    # today), so it is the value handed to compute_full_2025 for that purpose.
+    lines = compute_income_lines(
+        total_income=total_income,
+        division_b_deductions=division_b_deductions,
+        division_c_deductions=division_c_deductions,
+    )
+
+    breakdown = compute_full_2025(
+        lines.taxable_income,
+        lines.net_income,
+        province=province,
+    )
+    calculator = get_provincial_calculator(2025, province)
+
+    net_federal_tax = max(D("0.00"), breakdown.federal_tax - breakdown.federal_credits)
+    net_provincial_tax = (
+        max(D("0.00"), breakdown.provincial_tax - breakdown.provincial_credits)
+        + sum(breakdown.provincial_additions.values(), D("0.00"))
+    ).quantize(D("0.01"))
+
+    # Positive: balance owing (line 48500). Negative: refund (line 48400).
+    balance = breakdown.total_payable - withholding
+
+    return TaxComputation(
+        tax_year=tax_year,
+        province=calculator.code or (province or "ON").upper(),
+        lines=lines,
+        federal_bpa=federal_bpa_2025(lines.net_income),
+        federal_tax=breakdown.federal_tax,
+        federal_credits=breakdown.federal_credits,
+        net_federal_tax=net_federal_tax,
+        provincial_bpa=min(calculator.bpa, lines.taxable_income),
+        provincial_tax=breakdown.provincial_tax,
+        provincial_credits=breakdown.provincial_credits,
+        provincial_additions=dict(breakdown.provincial_additions),
+        net_provincial_tax=net_provincial_tax,
+        net_tax=breakdown.total_payable,
+        withholding=withholding,
+        balance=balance,
+    )
+
+
 def compute_return(in_: ReturnInput) -> ReturnCalc:
+    """Adapt a full :class:`ReturnInput` into the shared 2025 computation."""
     employment_income = t4mod.sum_employment_income(in_.slips_t4)
     t4a_income = sum_t4a_income(in_.slips_t4a)
     t5_income = sum_t5_income(in_.slips_t5)
     total_income = employment_income + t4a_income + t5_income
     rrsp_deductions = in_.rrsp_contrib + sum_rrsp_contributions(in_.rrsp_receipts)
 
-    # Total income → net income → taxable income, kept as distinct lines.
-    # Net income is what income-tested amounts key off (BPA phase-out today),
-    # so it is the value handed to compute_full_2025 for that purpose.
-    lines = compute_income_lines(
-        total_income=total_income,
-        division_b_deductions=rrsp_deductions,
-    )
-
-    breakdown = compute_full_2025(
-        lines.taxable_income,
-        lines.net_income,
-        province=in_.province,
-    )
-    cpp = t4mod.compute_cpp_2024(in_.slips_t4)
-    ei = t4mod.compute_ei_2024(in_.slips_t4)
-
     # T4 box 22 + T4A box 22 (CRA line 43700). T5's foreign_tax_withheld is
     # foreign-tax-credit territory (line 40500), not domestic withholding, and
     # is deliberately excluded -- see sum_t4a_tax_deducted.
     withholding = t4mod.sum_tax_deducted(in_.slips_t4) + sum_t4a_tax_deducted(in_.slips_t4a)
-    # Positive: balance owing (line 48500). Negative: refund (line 48400).
-    # Same sign convention as app.wizard.estimator so retiring that duplicate
-    # calculation path (Plan V3 execution roadmap PR 6) is a like-for-like swap.
-    balance = breakdown.total_payable - withholding
 
-    line_items = {
-        **lines.as_line_items(),
-        "federal_tax": breakdown.federal_tax,
-        "prov_tax": breakdown.provincial_tax,
-    }
-    totals = {
-        "net_tax": breakdown.total_payable,
-        "withholding": withholding,
-        "balance": balance,
-    }
+    computation = compute_from_amounts(
+        total_income,
+        rrsp_deductions,
+        province=in_.province,
+        withholding=withholding,
+        tax_year=in_.tax_year,
+    )
+
     return ReturnCalc(
         tax_year=in_.tax_year,
         province=in_.province,
-        line_items=line_items,
-        totals=totals,
-        cpp=cpp,
-        ei=ei,
-        provincial_additions=dict(breakdown.provincial_additions),
+        line_items=computation.as_line_items(),
+        totals=computation.as_totals(),
+        cpp=t4mod.compute_cpp_2024(in_.slips_t4),
+        ei=t4mod.compute_ei_2024(in_.slips_t4),
+        provincial_additions=dict(computation.provincial_additions),
     )

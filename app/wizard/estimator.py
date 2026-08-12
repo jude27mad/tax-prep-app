@@ -9,11 +9,7 @@ from app.core.provinces import (
     UnknownProvinceError,
     get_provincial_calculator,
 )
-from app.core.tax_years.y2025.federal import (
-    NRTC_RATE_2025 as FED_CREDIT_RATE_2025,
-    federal_bpa_2025,
-    federal_tax_2025,
-)
+from app.core.tax_years.y2025.calc import compute_from_amounts
 
 # Estimator constants. CPP/EI thresholds are local to the wizard because the
 # estimator's job is to validate T4 box totals against statutory maxima — these
@@ -85,70 +81,66 @@ def _quantize(value: Decimal) -> Decimal:
 
 
 def compute_tax_summary(income: float, rrsp: float, province: str) -> dict[str, Any]:
-    """Estimator-level Decimal compute that returns a JSON-friendly summary dict.
+    """Present the core tax computation as the estimator's JSON summary dict.
 
-    Output shape is preserved from the prior float implementation so existing
-    callers (CLI wizard preview, /tax/estimate endpoint, T4 endpoint) keep
-    working. Internal arithmetic now flows through the canonical Decimal path
-    (app/core/tax_years/y2025/federal + app/core/provinces) — the float
-    duplicate at app/tax/* is being retired.
+    This is a **presenter, not a calculator**. Every amount comes from
+    :func:`app.core.tax_years.y2025.calc.compute_from_amounts`; this function only
+    reshapes and floats them for JSON. Output shape is unchanged, so existing
+    callers (CLI wizard preview, ``/tax/estimate``, the T4 endpoints) keep working.
 
-    Behaviour deltas vs the prior float implementation:
-      * Provincial ``additions`` keys reflect Decimal-side names. For Ontario
-        this means ``ontario_surtax``/``ontario_health_premium`` instead of
-        the legacy ``surtax``/``health_premium``.
-      * Provincial ``before_credits`` and ``additions`` values may differ by a
-        cent or by the OHP step boundary in narrow income bands; the Decimal
-        path is the canonical source of truth.
+    Previously this re-assembled federal tax, credits, provincial tax, and
+    additions itself. That second implementation drifted from the filing path:
+    it passed *taxable* income to the Basic Personal Amount phase-out while
+    ``compute_return`` passed *total* income, so the two disagreed on the BPA for
+    anyone with deductions. ``docs/plan_v3.md`` §3 forbids a second calculator;
+    routing through the core is what makes that enforceable rather than aspirational.
     """
-    income_dec = to_decimal(income)
-    rrsp_dec = max(Decimal("0"), to_decimal(rrsp))
-    taxable_dec = max(Decimal("0"), income_dec - rrsp_dec)
-
-    # Federal
-    federal_before = federal_tax_2025(taxable_dec)
-    fed_bpa = federal_bpa_2025(taxable_dec)
-    fed_credit_amount = (fed_bpa * FED_CREDIT_RATE_2025).quantize(_CENT, rounding=ROUND_HALF_UP)
-    federal_after = max(Decimal("0"), federal_before - fed_credit_amount)
-
-    # Provincial
-    province_code = (province or "ON").upper()
+    # UnknownProvinceError subclasses KeyError, not ValueError, so it is
+    # converted here to preserve this function's long-standing contract: callers
+    # catch ValueError for an unsupported province.
     try:
-        calculator = get_provincial_calculator(2025, province_code)
+        computation = compute_from_amounts(
+            to_decimal(income),
+            max(Decimal("0"), to_decimal(rrsp)),
+            province=province,
+        )
+        # The provincial calculator is consulted only for display metadata
+        # (name, credit rate); every amount comes from the computation above.
+        calculator = get_provincial_calculator(2025, computation.province)
     except UnknownProvinceError as exc:
         raise ValueError(str(exc)) from exc
-
-    prov_before = calculator.tax(taxable_dec)
-    prov_credit_amount = calculator.credits()
-    prov_after = max(Decimal("0"), prov_before - prov_credit_amount)
-    additions_map = dict(calculator.additions(taxable_dec, prov_before, prov_credit_amount))
-    additions_total = sum(additions_map.values(), Decimal("0"))
-    prov_net = _quantize(prov_after + additions_total)
-    bpa_used = min(calculator.bpa, taxable_dec)
-
-    total_net_tax = _quantize(federal_after + prov_net)
 
     return {
         "income": income,
         "rrsp": rrsp,
-        "taxable_income": float(_quantize(taxable_dec)),
-        "province": calculator.code or province_code,
+        "taxable_income": float(computation.lines.taxable_income),
+        "province": computation.province,
         "federal": {
-            "before_credits": float(federal_before),
-            "bpa_used": float(fed_bpa),
-            "after_credits": float(_quantize(federal_after)),
+            "before_credits": float(computation.federal_tax),
+            "bpa_used": float(computation.federal_bpa),
+            "after_credits": float(computation.net_federal_tax),
         },
         "provincial": {
-            "province_code": calculator.code or province_code,
+            "province_code": computation.province,
             "province_name": calculator.name,
-            "before_credits": float(prov_before),
-            "bpa_used": float(_quantize(bpa_used)),
+            "before_credits": float(computation.provincial_tax),
+            "bpa_used": float(_quantize(computation.provincial_bpa)),
             "credit_rate": float(calculator.nrtc_rate),
-            "after_credits": float(_quantize(prov_after)),
-            "additions": {k: float(_quantize(v)) for k, v in additions_map.items()},
-            "net_provincial": float(prov_net),
+            "after_credits": float(
+                _quantize(
+                    max(
+                        Decimal("0"),
+                        computation.provincial_tax - computation.provincial_credits,
+                    )
+                )
+            ),
+            "additions": {
+                key: float(_quantize(value))
+                for key, value in computation.provincial_additions.items()
+            },
+            "net_provincial": float(computation.net_provincial_tax),
         },
-        "total_net_tax": float(total_net_tax),
+        "total_net_tax": float(computation.net_tax),
     }
 
 
@@ -181,11 +173,23 @@ def contribution_status(actual: float, maximum: float) -> str:
 
 
 def estimate_from_t4(payload: T4EstimateRequest) -> dict[str, Any]:
+    # Withholding and balance come from the core computation rather than being
+    # recomputed here, so the estimate and the filed return can never disagree
+    # about a refund. Sign convention is the core's: positive is balance owing,
+    # negative is a refund.
+    try:
+        computation = compute_from_amounts(
+            to_decimal(payload.box14),
+            max(Decimal("0"), to_decimal(payload.rrsp)),
+            province=payload.province,
+            withholding=to_decimal(payload.box22),
+        )
+    except UnknownProvinceError as exc:
+        raise ValueError(str(exc)) from exc
     tax_summary = compute_tax_summary(payload.box14, payload.rrsp, payload.province)
     total_tax = tax_summary["total_net_tax"]
-    total_tax_dec = to_decimal(total_tax)
-    withheld = round_cents(payload.box22)
-    balance = round_cents(total_tax_dec - to_decimal(withheld))
+    withheld = round_cents(computation.withholding)
+    balance = round_cents(computation.balance)
 
     cpp_max, cpp2_max = expected_cpp_contributions(payload.box14)
     ei_max = expected_ei_contribution(payload.box14)
