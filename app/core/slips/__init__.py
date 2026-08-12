@@ -49,3 +49,13 @@ def sum_rrsp_contributions(receipts: Sequence[RRSPReceipt]) -> Decimal:
         if receipt.contribution_amount:
             total += receipt.contribution_amount
     return total
+
+
+def sum_t4a_tax_deducted(slips: Sequence[T4ASlip]) -> Decimal:
+    """Income tax withheld at source across T4A box 22 (CRA line 43700).
+
+    T5 slips carry ``foreign_tax_withheld`` instead, which is foreign-tax-credit
+    territory (line 40500) and is not domestic withholding netted against
+    balance owing here -- deliberately excluded.
+    """
+    return _sum_fields(slips, ("tax_deducted",))

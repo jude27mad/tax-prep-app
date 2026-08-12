@@ -9,6 +9,7 @@ from app.core.models import ReturnCalc, ReturnInput
 from app.core.slips import (
     sum_rrsp_contributions,
     sum_t4a_income,
+    sum_t4a_tax_deducted,
     sum_t5_income,
 )
 from app.core.slips import t4 as t4mod
@@ -84,6 +85,15 @@ def compute_return(in_: ReturnInput) -> ReturnCalc:
     cpp = t4mod.compute_cpp_2024(in_.slips_t4)
     ei = t4mod.compute_ei_2024(in_.slips_t4)
 
+    # T4 box 22 + T4A box 22 (CRA line 43700). T5's foreign_tax_withheld is
+    # foreign-tax-credit territory (line 40500), not domestic withholding, and
+    # is deliberately excluded -- see sum_t4a_tax_deducted.
+    withholding = t4mod.sum_tax_deducted(in_.slips_t4) + sum_t4a_tax_deducted(in_.slips_t4a)
+    # Positive: balance owing (line 48500). Negative: refund (line 48400).
+    # Same sign convention as app.wizard.estimator so retiring that duplicate
+    # calculation path (Plan V3 execution roadmap PR 6) is a like-for-like swap.
+    balance = breakdown.total_payable - withholding
+
     line_items = {
         **lines.as_line_items(),
         "federal_tax": breakdown.federal_tax,
@@ -91,6 +101,8 @@ def compute_return(in_: ReturnInput) -> ReturnCalc:
     }
     totals = {
         "net_tax": breakdown.total_payable,
+        "withholding": withholding,
+        "balance": balance,
     }
     return ReturnCalc(
         tax_year=in_.tax_year,

@@ -49,7 +49,17 @@ CRA_LINE_NUMBERS: dict[str, str] = {
     "taxable_income": "26000",
     "federal_tax": "42000",
     "prov_tax": "42800",
+    # Total income tax deducted at source (T4/T4A box 22). Single line
+    # regardless of sign, unlike the refund/balance-owing pair below.
+    "withholding": "43700",
 }
+
+# Refund vs. balance owing aren't a single CRA line: which one applies depends
+# on the sign of ``ReturnCalc.totals["balance"]`` (positive = balance owing,
+# line 48500; negative = refund, line 48400). That duality doesn't fit
+# CRA_LINE_NUMBERS's one-key-one-line shape, so it's recorded here instead.
+BALANCE_OWING_LINE_NUMBER = "48500"
+REFUND_LINE_NUMBER = "48400"
 
 
 @dataclass(frozen=True)
@@ -106,7 +116,9 @@ def compute_income_lines(
 
 
 __all__ = [
+    "BALANCE_OWING_LINE_NUMBER",
     "CRA_LINE_NUMBERS",
     "IncomeLines",
+    "REFUND_LINE_NUMBER",
     "compute_income_lines",
 ]
