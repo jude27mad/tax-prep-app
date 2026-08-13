@@ -27,7 +27,7 @@ MarkupSafe==3.0.3
 mdurl==0.1.2
 mypy==2.3.0
 mypy_extensions==1.1.0
-packaging==25.0
+packaging==26.3
 pathspec==1.1.1
 pdf2image==1.17.0
 pillow==12.3.0
