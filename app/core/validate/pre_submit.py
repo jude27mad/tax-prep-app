@@ -169,6 +169,18 @@ ISSUE_RC210_NEGATIVE_AMOUNT = IssueTemplate(
     "62010",
     "RC210 advance CWB amount must be zero or positive.",
 )
+ISSUE_T4E_TAX_EXEMPT_EXCEEDS_BOX14 = IssueTemplate(
+    "t4e_tax_exempt_exceeds_benefits_paid",
+    "60021",
+    "T4E box 18 (tax-exempt benefits) cannot exceed box 14 (total benefits paid).",
+)
+ISSUE_T4E_REPAYMENT_UNSUPPORTED = IssueTemplate(
+    "t4e_repayment_unsupported",
+    "60022",
+    "T4E slips indicating a social benefits repayment (box 7 rate against box 15 "
+    "regular benefits) are not yet supported -- the line 23500/42200 repayment "
+    "calculation is not implemented.",
+)
 
 
 def _validate_postal_code(value: str) -> bool:
@@ -350,10 +362,37 @@ def _validate_t5_slips(slips: list[Any], emit, *, collection: str = "slips_t5", 
 
 def _validate_t4e_slips(slips: list[Any], emit, *, collection: str = "slips_t4e") -> None:
     for index, slip in enumerate(slips):
-        for field in ("benefits_paid", "tax_deducted"):
+        for field in (
+            "benefits_paid",
+            "tax_deducted",
+            "tax_exempt_benefits",
+            "repayment_rate",
+            "regular_benefits_paid",
+        ):
             value = _to_decimal(_get_value(slip, field))
             if value is not None and value < 0:
                 emit(ISSUE_T4E_NEGATIVE_AMOUNT, _field_path(collection, index, field))
+
+        benefits_paid = _to_decimal(_get_value(slip, "benefits_paid")) or Decimal("0")
+        tax_exempt = _to_decimal(_get_value(slip, "tax_exempt_benefits"))
+        if tax_exempt is not None and tax_exempt > benefits_paid:
+            emit(
+                ISSUE_T4E_TAX_EXEMPT_EXCEEDS_BOX14,
+                _field_path(collection, index, "tax_exempt_benefits"),
+            )
+
+        # The line 23500/42200 social benefits repayment calculation is not
+        # implemented (see T4ESlip's docstring). Reject rather than silently
+        # dropping box 7/box 15 and understating balance owing.
+        repayment_rate = _to_decimal(_get_value(slip, "repayment_rate"))
+        regular_benefits = _to_decimal(_get_value(slip, "regular_benefits_paid"))
+        if (
+            repayment_rate is not None
+            and repayment_rate > 0
+            and regular_benefits is not None
+            and regular_benefits > 0
+        ):
+            emit(ISSUE_T4E_REPAYMENT_UNSUPPORTED, _field_path(collection, index))
 
 
 def _validate_t5007_slips(slips: list[Any], emit, *, collection: str = "slips_t5007") -> None:

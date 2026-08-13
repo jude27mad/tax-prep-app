@@ -189,6 +189,44 @@ def test_summary_sections_do_not_overlap_with_full_ontario_additions(tmp_path):
     assert y_rrsp_last_row > 36 + min_clearance
 
 
+def _make_calc_with_t5007_offset() -> ReturnCalc:
+    """A return where the line 25000 deduction is actually non-zero."""
+    return ReturnCalc(
+        tax_year=2025,
+        province="ON",
+        line_items={
+            "income_total": Decimal("53000.00"),
+            "total_deductions": Decimal("0.00"),
+            "net_income": Decimal("53000.00"),
+            "division_c_deductions": Decimal("3000.00"),
+            "taxable_income": Decimal("50000.00"),
+            "federal_tax": Decimal("7500.00"),
+            "prov_tax": Decimal("3000.00"),
+        },
+        totals={"net_tax": Decimal("10500.00")},
+        cpp={"employee": Decimal("0.00")},
+        ei={"employee": Decimal("0.00")},
+        provincial_additions={},
+    )
+
+
+def test_division_c_deductions_line_is_rendered(tmp_path):
+    """The line 25000 amount that reconciles net to taxable income must be
+    visible on the printout, not just silently applied to the totals."""
+    request = _make_input()
+    calc = _make_calc_with_t5007_offset()
+    pdf_path = tmp_path / "t1.pdf"
+
+    render_t1_pdf(str(pdf_path), request, calc)
+    decoded = _decode_content_stream(pdf_path.read_bytes())
+
+    # Parentheses in the label are backslash-escaped by reportlab in the raw
+    # content stream, so match on the unambiguous unescaped portion.
+    assert "Other payments deduction" in decoded
+    assert "line 25000" in decoded
+    assert "$3,000.00" in decoded
+
+
 def test_render_t1_pdf_respects_explicit_filename(tmp_path, monkeypatch):
     monkeypatch.setenv("ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     request = _make_input()

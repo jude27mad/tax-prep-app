@@ -53,12 +53,30 @@ class T5Slip(BaseModel):
 class T4ESlip(BaseModel):
     """Statement of Employment Insurance and Other Benefits.
 
-    Box 14 (total benefits paid) feeds T1 line 11900. Box 22 (income tax
-    deducted) feeds line 43700 alongside T4/T4A withholding.
+    Box 14 (total benefits paid) feeds T1 line 11900, net of box 18. Box 22
+    (income tax deducted) feeds line 43700 alongside T4/T4A withholding.
+
+    Box 18 (tax-exempt benefits) applies to individuals registered or
+    eligible to be registered under the Indian Act whose benefits are
+    connected to a reserve. It is a subset of box 14, already included in
+    it, and CRA instructs reporting box 14 minus box 18 on line 11900 -- the
+    exempt portion is excluded from income entirely, not merely from
+    taxable income the way the T5007 line 25000 offset works.
+
+    Box 7 (repayment rate) and box 15 (regular and other benefits paid) feed
+    the line 23500/42200 social benefits repayment (EI "clawback") when net
+    income exceeds the year's repayment threshold. That calculation is not
+    yet implemented -- see the pre-submission gate in
+    app.core.validate.pre_submit -- so a slip carrying a nonzero repayment
+    rate against nonzero regular benefits is captured here but rejected
+    before transmission rather than silently omitted from balance owing.
     """
 
     benefits_paid: Decimal = Decimal("0.00")
     tax_deducted: Decimal | None = None
+    tax_exempt_benefits: Decimal | None = None
+    repayment_rate: Decimal | None = None
+    regular_benefits_paid: Decimal | None = None
     document_id: str | None = None
 
     _quantize_benefits_paid = field_validator(
@@ -68,6 +86,9 @@ class T4ESlip(BaseModel):
 
     _quantize_optional_fields = field_validator(
         "tax_deducted",
+        "tax_exempt_benefits",
+        "repayment_rate",
+        "regular_benefits_paid",
         mode="after",
     )(_quantize_decimal)
 

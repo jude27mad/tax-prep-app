@@ -58,6 +58,9 @@ def _input(
     t4_income: str = "0.00",
     t4e_benefits: str | None = None,
     t4e_tax_deducted: str | None = None,
+    t4e_tax_exempt: str | None = None,
+    t4e_repayment_rate: str | None = None,
+    t4e_regular_benefits: str | None = None,
     t5007_wc: str | None = None,
     t5007_sa: str | None = None,
     tax_year: int = 2025,
@@ -68,6 +71,11 @@ def _input(
             T4ESlip(
                 benefits_paid=D(t4e_benefits),
                 tax_deducted=D(t4e_tax_deducted) if t4e_tax_deducted is not None else None,
+                tax_exempt_benefits=D(t4e_tax_exempt) if t4e_tax_exempt is not None else None,
+                repayment_rate=D(t4e_repayment_rate) if t4e_repayment_rate is not None else None,
+                regular_benefits_paid=(
+                    D(t4e_regular_benefits) if t4e_regular_benefits is not None else None
+                ),
             )
         ]
     slips_t5007 = []
@@ -119,6 +127,17 @@ def test_sum_t4e_income_and_tax_deducted():
     assert sum_t4e_tax_deducted(slips) == D("300.00")
 
 
+def test_sum_t4e_income_nets_tax_exempt_benefits():
+    # Box 18 is a subset of box 14 that CRA instructs be excluded from line
+    # 11900 entirely -- unlike the T5007 line 25000 offset, it never reaches
+    # income even transiently.
+    slips = [
+        T4ESlip(benefits_paid=D("4000.00"), tax_exempt_benefits=D("1500.00")),
+        T4ESlip(benefits_paid=D("1000.00")),
+    ]
+    assert sum_t4e_income(slips) == D("3500.00")
+
+
 def test_sum_t5007_income_combines_both_boxes():
     slips = [T5007Slip(workers_compensation=D("1000.00"), social_assistance=D("2500.00"))]
     assert sum_t5007_income(slips) == D("3500.00")
@@ -147,6 +166,16 @@ class TestT4EAndT5007Wiring:
             _input(t4e_benefits="5000.00", t4e_tax_deducted="400.00", tax_year=tax_year)
         )
         assert calc.totals["withholding"] == D("400.00")
+
+    def test_t4e_tax_exempt_benefits_are_excluded_from_total_income(self, compute, tax_year):
+        # Box 18 never reaches income -- not net income, not taxable income --
+        # unlike the T5007 line 25000 offset, which stays in net income.
+        calc = compute(
+            _input(t4e_benefits="5000.00", t4e_tax_exempt="2000.00", tax_year=tax_year)
+        )
+        assert calc.line_items["income_total"] == D("3000.00")
+        assert calc.line_items["net_income"] == D("3000.00")
+        assert calc.line_items["taxable_income"] == D("3000.00")
 
     def test_t5007_income_reaches_total_income(self, compute, tax_year):
         calc = compute(
@@ -199,3 +228,43 @@ def test_negative_rc210_amount_is_rejected():
     req.slips_rc210 = [RC210Slip(advance_cwb_payments=D("-1.00"))]
     issues = validate_return_input(req)
     assert "rc210_negative_amount" in issues
+
+
+def test_t4e_tax_exempt_exceeding_benefits_paid_is_rejected():
+    req = _input(t4e_benefits="1000.00", t4e_tax_exempt="1000.01")
+    issues = validate_return_input(req)
+    assert "t4e_tax_exempt_exceeds_benefits_paid" in issues
+
+
+def test_t4e_repayment_indicators_are_rejected_as_unsupported():
+    # Box 7 (repayment rate) against box 15 (regular benefits) signals the
+    # line 23500/42200 social benefits repayment, which is not implemented --
+    # this must be gated rather than silently omitted from balance owing.
+    req = _input(
+        t4e_benefits="20000.00",
+        t4e_repayment_rate="30.00",
+        t4e_regular_benefits="20000.00",
+    )
+    issues = validate_return_input(req)
+    assert "t4e_repayment_unsupported" in issues
+
+
+@pytest.mark.parametrize(
+    ("repayment_rate", "regular_benefits"),
+    [
+        (None, "20000.00"),  # no rate quoted -- no repayment signalled
+        ("30.00", None),  # no regular-benefits figure to apply the rate to
+        ("0.00", "20000.00"),  # explicit zero rate
+        ("30.00", "0.00"),  # explicit zero regular benefits
+    ],
+)
+def test_t4e_without_both_repayment_indicators_is_not_gated(
+    repayment_rate, regular_benefits
+):
+    req = _input(
+        t4e_benefits="20000.00",
+        t4e_repayment_rate=repayment_rate,
+        t4e_regular_benefits=regular_benefits,
+    )
+    issues = validate_return_input(req)
+    assert "t4e_repayment_unsupported" not in issues

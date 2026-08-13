@@ -51,6 +51,7 @@ LINE_ITEM_ROWS = (
     ("income_total", "Total income"),
     ("total_deductions", "Deductions"),
     ("net_income", "Net income"),
+    ("division_c_deductions", "Other payments deduction (line 25000)"),
     ("taxable_income", "Taxable income"),
     ("federal_tax", "Federal tax"),
     ("prov_tax", "Provincial tax"),
