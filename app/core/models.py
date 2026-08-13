@@ -50,6 +50,88 @@ class T5Slip(BaseModel):
     )(_quantize_decimal)
 
 
+class T4ESlip(BaseModel):
+    """Statement of Employment Insurance and Other Benefits.
+
+    Box 14 (total benefits paid) feeds T1 line 11900, net of box 18. Box 22
+    (income tax deducted) feeds line 43700 alongside T4/T4A withholding.
+
+    Box 18 (tax-exempt benefits) applies to individuals registered or
+    eligible to be registered under the Indian Act whose benefits are
+    connected to a reserve. It is a subset of box 14, already included in
+    it, and CRA instructs reporting box 14 minus box 18 on line 11900 -- the
+    exempt portion is excluded from income entirely, not merely from
+    taxable income the way the T5007 line 25000 offset works.
+
+    Box 7 (repayment rate) and box 15 (regular and other benefits paid) feed
+    the line 23500/42200 social benefits repayment (EI "clawback") when net
+    income exceeds the year's repayment threshold. That calculation is not
+    yet implemented -- see the pre-submission gate in
+    app.core.validate.pre_submit -- so a slip carrying a nonzero repayment
+    rate against nonzero regular benefits is captured here but rejected
+    before transmission rather than silently omitted from balance owing.
+    """
+
+    benefits_paid: Decimal = Decimal("0.00")
+    tax_deducted: Decimal | None = None
+    tax_exempt_benefits: Decimal | None = None
+    repayment_rate: Decimal | None = None
+    regular_benefits_paid: Decimal | None = None
+    document_id: str | None = None
+
+    _quantize_benefits_paid = field_validator(
+        "benefits_paid",
+        mode="after",
+    )(_quantize_decimal)
+
+    _quantize_optional_fields = field_validator(
+        "tax_deducted",
+        "tax_exempt_benefits",
+        "repayment_rate",
+        "regular_benefits_paid",
+        mode="after",
+    )(_quantize_decimal)
+
+
+class T5007Slip(BaseModel):
+    """Statement of Benefits: workers' compensation and social assistance.
+
+    Box 10 (workers' compensation) feeds line 14400; box 11 (social
+    assistance, including provincial/territorial supplements) feeds line
+    14500. Both are included in total income and then fully offset by the
+    line 25000 deduction -- taxed at 0% but still counted in net income for
+    income-tested amounts. T5007 carries no tax-deducted box.
+    """
+
+    workers_compensation: Decimal | None = None
+    social_assistance: Decimal | None = None
+    document_id: str | None = None
+
+    _quantize_optional_fields = field_validator(
+        "workers_compensation",
+        "social_assistance",
+        mode="after",
+    )(_quantize_decimal)
+
+
+class RC210Slip(BaseModel):
+    """Advance Canada Workers Benefit payments statement.
+
+    Reports CWB amounts already advanced to the taxpayer during the year, to
+    be reconciled against the Schedule 6 entitlement (CRA line 41500). Not
+    income and not yet consumed by the calculation engine -- Schedule 6/CWB
+    wiring is separate credit work.
+    """
+
+    advance_cwb_payments: Decimal = Decimal("0.00")
+    document_id: str | None = None
+
+    _quantize_advance_cwb_payments = field_validator(
+        "advance_cwb_payments",
+        mode="after",
+    )(_quantize_decimal)
+
+
 class TuitionSlip(BaseModel):
     institution_name: str | None = None
     eligible_tuition: Decimal = Decimal("0.00")
@@ -135,6 +217,9 @@ class ReturnInput(BaseModel):
     slips_t4: list[T4Slip] = Field(default_factory=list)
     slips_t4a: list[T4ASlip] = Field(default_factory=list)
     slips_t5: list[T5Slip] = Field(default_factory=list)
+    slips_t4e: list[T4ESlip] = Field(default_factory=list)
+    slips_t5007: list[T5007Slip] = Field(default_factory=list)
+    slips_rc210: list[RC210Slip] = Field(default_factory=list)
     tuition_slips: list[TuitionSlip] = Field(default_factory=list)
     rrsp_receipts: list[RRSPReceipt] = Field(default_factory=list)
     deductions: DeductionCreditInputs = Field(default_factory=DeductionCreditInputs)

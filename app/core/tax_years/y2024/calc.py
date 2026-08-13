@@ -11,7 +11,11 @@ from app.core.slips import (
     sum_rrsp_contributions,
     sum_t4a_income,
     sum_t4a_tax_deducted,
+    sum_t4e_income,
+    sum_t4e_tax_deducted,
     sum_t5_income,
+    sum_t5007_income,
+    sum_t5007_offset,
 )
 from app.core.slips import t4 as t4mod
 from app.core.provinces import get_provincial_calculator
@@ -146,19 +150,35 @@ def compute_return(in_: ReturnInput) -> ReturnCalc:
     employment_income = t4mod.sum_employment_income(in_.slips_t4)
     t4a_income = sum_t4a_income(in_.slips_t4a)
     t5_income = sum_t5_income(in_.slips_t5)
-    total_income = employment_income + t4a_income + t5_income
+    ei_income = sum_t4e_income(in_.slips_t4e)
+    social_assistance_income = sum_t5007_income(in_.slips_t5007)
+    total_income = (
+        employment_income + t4a_income + t5_income + ei_income + social_assistance_income
+    )
     rrsp_deductions = in_.rrsp_contrib + sum_rrsp_contributions(in_.rrsp_receipts)
 
-    # T4 box 22 + T4A box 22 (CRA line 43700). T5's foreign_tax_withheld is
-    # foreign-tax-credit territory (line 40500), not domestic withholding, and
-    # is deliberately excluded -- see sum_t4a_tax_deducted.
-    withholding = t4mod.sum_tax_deducted(in_.slips_t4) + sum_t4a_tax_deducted(in_.slips_t4a)
+    # T4 box 22 + T4A box 22 + T4E box 22 (CRA line 43700). T5's
+    # foreign_tax_withheld is foreign-tax-credit territory (line 40500), not
+    # domestic withholding, and is deliberately excluded -- see
+    # sum_t4a_tax_deducted. T5007 carries no tax-deducted box.
+    withholding = (
+        t4mod.sum_tax_deducted(in_.slips_t4)
+        + sum_t4a_tax_deducted(in_.slips_t4a)
+        + sum_t4e_tax_deducted(in_.slips_t4e)
+    )
+
+    # Line 25000: workers' compensation and social assistance are included in
+    # total income above, then fully offset here on the way to taxable income
+    # -- taxed at 0% but still counted in net income for income-tested
+    # amounts. See app.core.lines and sum_t5007_offset.
+    division_c_deductions = sum_t5007_offset(in_.slips_t5007)
 
     computation = compute_from_amounts(
         total_income,
         rrsp_deductions,
         province=in_.province,
         withholding=withholding,
+        division_c_deductions=division_c_deductions,
         tax_year=in_.tax_year,
     )
 
