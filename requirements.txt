@@ -2,23 +2,23 @@ fastapi>=0.141.1,<1.0
 # python-multipart: >=0.0.22 fixes GHSA-wp53 (Arbitrary File Write), >=0.0.26 fixes GHSA-mj87 (DoS via large preamble/epilogue),
 # >=0.0.27 fixes GHSA-pp6c-gr5w-3c5g / CVE-2026-42561 (DoS via unbounded multipart part headers).
 python-multipart>=0.0.27,<1.0
-uvicorn[standard]>=0.52.1,<1.0
+uvicorn[standard]>=0.52.3,<1.0
 pydantic>=2.13.4,<3.0
 httpx>=0.27,<1.0
 anyio>=4.14.2,<5.0
 # python-dotenv: >=1.2.2 fixes GHSA-mf9w (Symlink following in set_key).
-python-dotenv>=1.2.2,<2.0
+python-dotenv>=1.2.3,<2.0
 reportlab>=5.0.0,<6.0
 # pytest: >=9.0.3 fixes GHSA-6w46 (vulnerable tmpdir handling). Major-version bump from 8.x.
 pytest>=9.1.1,<10.0
 pytest-asyncio>=1.4.0,<2.0
-ruff>=0.16.2,<1.0
-mypy>=2.3.0,<3.0
+ruff>=0.16.3,<1.0
+mypy>=2.3.1,<3.0
 xmlschema>=4.3.2,<5.0
 # cryptography: >=46.0.5 fixes GHSA-r6ph (SECT curves subgroup attack), >=46.0.6 fixes GHSA-m959 (DNS name constraint);
 # >=48.0.1 fixes GHSA-537c-gmf6-5ccf (vulnerable statically-linked OpenSSL in the PyPI wheels). Major bump from 46.x.
 cryptography>=50.0.0,<51.0
-hypothesis>=6.165.2,<7.0
+hypothesis>=6.165.10,<7.0
 jinja2>=3.1,<4.0
 rich>=15.0.0,<16.0
 pytesseract>=0.3.10,<0.4
@@ -26,11 +26,11 @@ pdf2image>=1.17,<2.0
 # pillow: >=12.1.1 fixes GHSA-cfh3 (OOB write on PSD), >=12.2.0 fixes GHSA-whj4 (FITS GZIP decompression bomb). Major bump from 10.x.
 pillow>=12.3.0,<13.0
 playwright>=1.62.0,<2.0
-pytest-playwright>=0.8.0,<1.0
+pytest-playwright>=0.9.0,<1.0
 
 # D1.3: persistent document vault — SQLModel on SQLAlchemy 2.0 async + SQLite.
 sqlmodel>=0.0.39,<1.0
-sqlalchemy>=2.0.51,<3.0
+sqlalchemy>=2.0.52,<3.0
 aiosqlite>=0.20,<1.0
 alembic>=1.19.1,<2.0
 
