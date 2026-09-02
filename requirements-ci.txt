@@ -34,8 +34,8 @@ pillow==12.3.0
 playwright==1.62.0
 pluggy==1.6.0
 pycparser==3.0
-pydantic==2.13.4
-pydantic_core==2.48.0
+pydantic==2.13.5
+pydantic_core==2.46.5
 Mako==1.4.1
 alembic==1.19.1
 aiosqlite==0.22.1
