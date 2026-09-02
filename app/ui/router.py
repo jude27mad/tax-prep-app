@@ -46,6 +46,7 @@ from app.wizard import (
     list_profiles,
     list_trash,
     load_profile,
+    load_profile_async,
     rename_profile,
     restore_profile,
     save_profile_data,
@@ -949,7 +950,7 @@ async def create_profile(
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
     slug = slugify(name)
-    data, _, load_errors = load_profile(slug, user_id=user.id)
+    data, _, load_errors = await load_profile_async(slug, user_id=user.id)
     if load_errors:
         raise HTTPException(status_code=400, detail="Unable to load existing profile state.")
     if data:
