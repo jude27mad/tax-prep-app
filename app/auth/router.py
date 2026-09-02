@@ -115,7 +115,9 @@ def _safe_next_path(value: str | None) -> str:
         return "/"
     if not value.startswith("/"):
         return "/"
-    if value.startswith("//"):
+    if value.startswith("//") or value.startswith("/\\"):
+        return "/"
+    if "\\" in value:
         return "/"
     return value
 

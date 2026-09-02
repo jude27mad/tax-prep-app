@@ -196,6 +196,16 @@ def test_login_page_rejects_unsafe_next(
     assert "evil.example" not in resp.text
 
 
+def test_login_page_rejects_backslash_bypass_next(
+    client: tuple[TestClient, RecordingEmailBackend],
+) -> None:
+    """Paths containing backslashes (e.g. bypass /\\evil.example) must be neutralized."""
+    c, _ = client
+    resp = c.get("/auth/login?next=/%5Cevil.example/hax")
+    assert resp.status_code == 200
+    assert "evil.example" not in resp.text
+
+
 def test_form_post_request_redirects_to_sent(
     client: tuple[TestClient, RecordingEmailBackend],
 ) -> None:
@@ -211,7 +221,10 @@ def test_form_post_request_redirects_to_sent(
     assert resp.headers["location"] == "/auth/sent"
     assert len(backend.sent) == 1
     # Next path must be baked into the magic link so verify can redirect back.
-    assert "next=%2Fui%2Fprofiles" in backend.sent[0].link or "next=/ui/profiles" in backend.sent[0].link
+    assert (
+        "next=%2Fui%2Fprofiles" in backend.sent[0].link
+        or "next=/ui/profiles" in backend.sent[0].link
+    )
 
 
 def test_form_post_request_renders_error_on_bad_email(
@@ -280,7 +293,9 @@ def test_form_post_logout_redirects_to_login(
     token = backend.sent[0].link.split("token=", 1)[1]
     c.get(f"/auth/verify?token={token}", follow_redirects=False)
 
-    resp = c.post("/auth/logout", headers={"accept": "text/html"}, follow_redirects=False)
+    resp = c.post(
+        "/auth/logout", headers={"accept": "text/html"}, follow_redirects=False
+    )
     assert resp.status_code == 303
     assert resp.headers["location"] == "/auth/login"
     assert c.get("/auth/me").status_code == 401
