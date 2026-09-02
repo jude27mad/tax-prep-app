@@ -1,6 +1,8 @@
 from decimal import Decimal
 from datetime import date, datetime
-from pydantic import BaseModel, Field, field_validator
+from typing import Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 _CENT = Decimal("0.01")
@@ -211,6 +213,195 @@ class DeductionCreditInputs(BaseModel):
     )(_quantize_decimal)
 
 
+# --- Prior tax state -------------------------------------------------------
+#
+# Opening balances and limits a return *inherits* from prior years. They are
+# inputs, never results: nothing here is computed from the current return, and
+# nothing here is consumed by the current return's calculation. Roadmap PR 8
+# establishes the contract only; Schedule 11 (tuition) and Schedule 7 (RRSP)
+# consume it later, when the accounting relationships they close become real:
+#
+#     opening tuition + current tuition
+#         = used + transferred + closing carryforward
+#     opening unused RRSP contributions + current qualifying contributions
+#         = claimed + closing unused contributions
+#
+# The right-hand side of each identity is a deterministic output or an
+# election, so none of it belongs here. ``rrsp_contrib``, ``tuition_claim``,
+# and ``tuition_transfer_to_spouse`` keep their existing meaning untouched.
+
+#: Where a prior amount was obtained. Symbolic, matching the evidence-kind
+#: pattern in :mod:`app.explain.models`; anything outside this set is rejected
+#: rather than silently recorded as unknown provenance.
+PriorAmountSource = Literal[
+    "cra_afr",  # CRA Auto-fill My Return download
+    "prior_noa",  # prior-year Notice of Assessment
+    "prior_reassessment",  # prior-year Notice of Reassessment
+    "prior_filed_return",  # the prior year's filed return
+    "manual",  # keyed in by the preparer or taxpayer
+]
+
+#: Stable issue codes for prior-state rejections. Local slugs in the style of
+#: :mod:`app.core.validate.pre_submit`'s ``IssueTemplate.local``. They are
+#: raised inside pydantic validation messages, so a caller gets both the code
+#: and pydantic's precise field path (``loc``) for the offending value.
+ISSUE_PRIOR_AMOUNT_NEGATIVE = "prior_amount_negative"
+ISSUE_PRIOR_AMOUNT_MISSING_PROVENANCE = "prior_amount_missing_provenance"
+ISSUE_PRIOR_PROVENANCE_MISSING_REFERENCE = "prior_provenance_missing_reference"
+ISSUE_PRIOR_PROVENANCE_NAIVE_TIMESTAMP = "prior_provenance_naive_timestamp"
+ISSUE_PRIOR_STATE_MISSING_IDENTITY = "prior_state_missing_identity"
+ISSUE_PRIOR_STATE_TAX_YEAR_MISMATCH = "prior_state_tax_year_mismatch"
+
+
+class PriorAmountProvenance(BaseModel):
+    """Where one prior amount came from, and how trusted it is.
+
+    Provenance is per amount, not per state: a return's federal tuition
+    carryforward may come from a CRA Auto-fill download while its RRSP
+    deduction limit comes from a Notice of Assessment the taxpayer typed in.
+    Collapsing those onto one record would attribute one document's trust
+    level to figures it never covered.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: PriorAmountSource
+    #: The tax year the source document reports on, which is not necessarily
+    #: the year the state applies to -- a reassessment of 2022 can restate a
+    #: carryforward that opens 2025.
+    source_tax_year: int
+    #: When the value was captured. Timezone-aware so two captures from
+    #: different machines remain orderable.
+    captured_at: datetime
+    #: Whether a human has confirmed/reviewed the amount against its source.
+    confirmed: bool = False
+    #: Identifier of the source document (AFR download id, NOA number, ...).
+    reference_id: str | None = None
+    #: Optional pointer to a review or manual override record.
+    review_ref: str | None = None
+
+    @field_validator("reference_id", "review_ref", mode="after")
+    @classmethod
+    def _blank_is_absent(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("captured_at", mode="after")
+    @classmethod
+    def _require_aware_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(
+                f"{ISSUE_PRIOR_PROVENANCE_NAIVE_TIMESTAMP}: "
+                "captured_at must be timezone-aware."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _require_reference_for_documents(self) -> "PriorAmountProvenance":
+        # A document-backed amount is only auditable if the document can be
+        # named. Manual entry has no external document to cite, so it is the
+        # one source permitted without a reference.
+        if self.source != "manual" and not self.reference_id:
+            raise ValueError(
+                f"{ISSUE_PRIOR_PROVENANCE_MISSING_REFERENCE}: "
+                f"source '{self.source}' requires a nonblank reference_id."
+            )
+        return self
+
+
+class PriorAmount(BaseModel):
+    """A prior-year amount together with its own provenance.
+
+    Zero means "no opening balance", which needs no document. Any positive
+    amount reduces tax or expands a limit, so it must say where it came from.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: Decimal = Decimal("0.00")
+    provenance: PriorAmountProvenance | None = None
+
+    @field_validator("amount", mode="after")
+    @classmethod
+    def _reject_negative_then_quantize(cls, value: Decimal) -> Decimal:
+        # The sign is checked *before* quantization, deliberately. Quantizing
+        # first maps any negative fraction of a cent onto Decimal("-0.00"),
+        # which is neither < 0 nor > 0, so a sign check made afterwards would
+        # wave -0.004 through as an empty amount -- and an empty amount needs
+        # no provenance, so malformed API or OCR data would be recorded as an
+        # established zero opening balance rather than rejected.
+        if value < 0:
+            raise ValueError(
+                f"{ISSUE_PRIOR_AMOUNT_NEGATIVE}: prior amounts cannot be negative."
+            )
+        return value.quantize(_CENT)
+
+    @model_validator(mode="after")
+    def _require_provenance_for_positive_amounts(self) -> "PriorAmount":
+        if self.amount > 0 and self.provenance is None:
+            raise ValueError(
+                f"{ISSUE_PRIOR_AMOUNT_MISSING_PROVENANCE}: "
+                "a positive prior amount requires provenance."
+            )
+        return self
+
+
+class PriorTaxState(BaseModel):
+    """Opening balances and limits inherited from prior tax years.
+
+    Federal and Ontario tuition carryforwards are tracked separately because
+    they are separate balances under separate rules -- they diverge whenever
+    the two jurisdictions allow different amounts, and a single combined
+    figure could not be reconciled against either Schedule 11.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The return year this state opens. ``None`` means no prior state has
+    #: been established, which is the default for every existing caller.
+    applies_to_tax_year: int | None = None
+    #: The date the state was established -- the "as of" date of the CRA
+    #: account view, notice, or manual capture the amounts were read from.
+    established_as_of: date | None = None
+
+    opening_federal_tuition_carryforward: PriorAmount = Field(default_factory=PriorAmount)
+    opening_ontario_tuition_carryforward: PriorAmount = Field(default_factory=PriorAmount)
+    rrsp_deduction_limit: PriorAmount = Field(default_factory=PriorAmount)
+    opening_unused_rrsp_contributions: PriorAmount = Field(default_factory=PriorAmount)
+    hbp_required_repayment: PriorAmount = Field(default_factory=PriorAmount)
+    llp_required_repayment: PriorAmount = Field(default_factory=PriorAmount)
+
+    def amounts(self) -> Mapping[str, PriorAmount]:
+        """Every prior amount keyed by field name, for callers that iterate."""
+        return {
+            "opening_federal_tuition_carryforward": self.opening_federal_tuition_carryforward,
+            "opening_ontario_tuition_carryforward": self.opening_ontario_tuition_carryforward,
+            "rrsp_deduction_limit": self.rrsp_deduction_limit,
+            "opening_unused_rrsp_contributions": self.opening_unused_rrsp_contributions,
+            "hbp_required_repayment": self.hbp_required_repayment,
+            "llp_required_repayment": self.llp_required_repayment,
+        }
+
+    def is_established(self) -> bool:
+        """Whether any prior amount has actually been supplied."""
+        return any(entry.amount > 0 for entry in self.amounts().values())
+
+    @model_validator(mode="after")
+    def _require_identity_once_established(self) -> "PriorTaxState":
+        # An all-zero state is "nothing carried forward" and needs no identity.
+        # The moment a real balance is present, the state has to say which year
+        # it opens and when it was read, or it cannot be re-verified later.
+        if self.is_established() and (
+            self.applies_to_tax_year is None or self.established_as_of is None
+        ):
+            raise ValueError(
+                f"{ISSUE_PRIOR_STATE_MISSING_IDENTITY}: a prior state carrying "
+                "amounts must set applies_to_tax_year and established_as_of."
+            )
+        return self
+
+
 class ReturnInput(BaseModel):
     taxpayer: Taxpayer
     household: Household | None = None
@@ -223,6 +414,10 @@ class ReturnInput(BaseModel):
     tuition_slips: list[TuitionSlip] = Field(default_factory=list)
     rrsp_receipts: list[RRSPReceipt] = Field(default_factory=list)
     deductions: DeductionCreditInputs = Field(default_factory=DeductionCreditInputs)
+    # Opening balances inherited from prior years. Defaulted, so every existing
+    # caller and fixture keeps working, and calculation-neutral: no computation
+    # handler reads it yet (see PriorTaxState).
+    prior_tax_state: PriorTaxState = Field(default_factory=PriorTaxState)
     rrsp_contrib: Decimal = Decimal("0.00")
     tuition_claim: Decimal = Decimal("0.00")
     tuition_transfer_to_spouse: Decimal = Decimal("0.00")
@@ -234,6 +429,19 @@ class ReturnInput(BaseModel):
     tax_year: int = 2025
     transmitter_account_mm: str | None = None
     rep_id: str | None = None
+
+    @model_validator(mode="after")
+    def _prior_state_matches_tax_year(self) -> "ReturnInput":
+        # Opening balances are year-specific: a carryforward that opens 2024 is
+        # not the carryforward that opens 2025. Attaching one to the wrong
+        # return would silently misstate every amount derived from it later.
+        applies_to = self.prior_tax_state.applies_to_tax_year
+        if applies_to is not None and applies_to != self.tax_year:
+            raise ValueError(
+                f"{ISSUE_PRIOR_STATE_TAX_YEAR_MISMATCH}: prior_tax_state applies "
+                f"to tax year {applies_to}, but the return is for {self.tax_year}."
+            )
+        return self
 
 
 class ReturnCalc(BaseModel):
