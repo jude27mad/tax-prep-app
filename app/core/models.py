@@ -322,14 +322,23 @@ class PriorAmount(BaseModel):
     amount: Decimal = Decimal("0.00")
     provenance: PriorAmountProvenance | None = None
 
-    _quantize_amount = field_validator("amount", mode="after")(_quantize_decimal)
-
-    @model_validator(mode="after")
-    def _require_provenance_for_positive_amounts(self) -> "PriorAmount":
-        if self.amount < 0:
+    @field_validator("amount", mode="after")
+    @classmethod
+    def _reject_negative_then_quantize(cls, value: Decimal) -> Decimal:
+        # The sign is checked *before* quantization, deliberately. Quantizing
+        # first maps any negative fraction of a cent onto Decimal("-0.00"),
+        # which is neither < 0 nor > 0, so a sign check made afterwards would
+        # wave -0.004 through as an empty amount -- and an empty amount needs
+        # no provenance, so malformed API or OCR data would be recorded as an
+        # established zero opening balance rather than rejected.
+        if value < 0:
             raise ValueError(
                 f"{ISSUE_PRIOR_AMOUNT_NEGATIVE}: prior amounts cannot be negative."
             )
+        return value.quantize(_CENT)
+
+    @model_validator(mode="after")
+    def _require_provenance_for_positive_amounts(self) -> "PriorAmount":
         if self.amount > 0 and self.provenance is None:
             raise ValueError(
                 f"{ISSUE_PRIOR_AMOUNT_MISSING_PROVENANCE}: "

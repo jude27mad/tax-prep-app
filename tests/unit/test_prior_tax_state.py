@@ -212,6 +212,43 @@ def test_negative_prior_amount_is_rejected():
     assert "prior_amount_negative" in _codes(exc.value)
 
 
+@pytest.mark.parametrize("raw", ["-0.004", "-0.001", "-0.0049", "-1E-9"])
+def test_sub_cent_negative_prior_amount_is_rejected(raw):
+    """The sign is judged before quantization, not after.
+
+    ``D("-0.004").quantize(D("0.01"))`` is ``D("-0.00")``, which is neither
+    ``< 0`` nor ``> 0``. Checking the sign after quantization would accept the
+    value *and* skip the provenance rule with it, recording malformed input as
+    an established zero opening balance.
+    """
+    with pytest.raises(ValidationError) as exc:
+        PriorAmount(amount=D(raw), provenance=_provenance())
+    assert _codes(exc.value) == ["prior_amount_negative"]
+
+
+def test_sub_cent_negative_prior_amount_is_rejected_without_provenance():
+    # The path that made the bug consequential: quantized to "-0.00" the value
+    # looks like an empty amount, and empty amounts need no document.
+    with pytest.raises(ValidationError) as exc:
+        PriorAmount(amount=D("-0.004"))
+    assert _codes(exc.value) == ["prior_amount_negative"]
+
+
+def test_negative_zero_is_accepted_as_the_zero_it_is():
+    # The rule is about the value's sign, not Decimal's sign bit: -0.00 is
+    # zero, so it is an absent opening balance and needs no provenance.
+    entry = PriorAmount(amount=D("-0.00"))
+    assert entry.amount == D("0.00")
+    assert entry.provenance is None
+
+
+def test_sub_cent_positive_prior_amount_still_quantizes_to_zero():
+    # The asymmetry is intentional: quantization may erase a positive amount
+    # (a legal value, rounded to an empty balance), but may never erase the
+    # sign of an illegal one.
+    assert PriorAmount(amount=D("0.004")).amount == D("0.00")
+
+
 def test_positive_prior_amount_without_provenance_is_rejected():
     with pytest.raises(ValidationError) as exc:
         PriorAmount(amount=D("1.00"))
@@ -389,7 +426,25 @@ def test_negative_amount_reports_its_precise_field_path():
     )
     with pytest.raises(ValidationError) as exc:
         ReturnInput.model_validate(payload)
-    assert _locs(exc.value) == [("prior_tax_state", "rrsp_deduction_limit")]
+    # The sign rule belongs to the scalar, so the path names the scalar. The
+    # provenance rule below is a cross-field rule and stops at the record.
+    assert _locs(exc.value) == [("prior_tax_state", "rrsp_deduction_limit", "amount")]
+    assert _codes(exc.value) == ["prior_amount_negative"]
+
+
+@pytest.mark.parametrize("raw", ["-0.004", "-0.0049", "-1E-9", -0.004])
+def test_sub_cent_negative_amount_is_rejected_through_the_payload_path(raw):
+    """The API/OCR vector: a negative too small to survive cent quantization.
+
+    A payload amount arrives as a JSON string or number, so this pins the
+    rejection on the deserialization path the finding names, not only on
+    direct ``Decimal`` construction.
+    """
+    payload = _payload(
+        rrsp_deduction_limit={"amount": raw, "provenance": _provenance_payload()}
+    )
+    with pytest.raises(ValidationError) as exc:
+        ReturnInput.model_validate(payload)
     assert _codes(exc.value) == ["prior_amount_negative"]
 
 
