@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import functools
 import mimetypes
 import re
 import secrets
@@ -582,11 +583,16 @@ def _keyword_pattern(keyword: str) -> str:
     return escaped.replace("\\ ", r"\s+")
 
 
+@functools.lru_cache(maxsize=128)
+def _get_keyword_regex(keyword: str) -> re.Pattern[str]:
+    pattern = _keyword_pattern(keyword)
+    return re.compile(rf"{pattern}[^0-9\-]*(-?[\d,\s]*\.?\d+)", re.IGNORECASE)
+
+
 def _extract_numeric_value(text: str, keywords: Iterable[str]) -> str | None:
     normalized = text.replace("\r", " ")
     for keyword in keywords:
-        pattern = _keyword_pattern(keyword)
-        regex = re.compile(rf"{pattern}[^0-9\-]*(-?[\d,\s]*\.?\d+)", re.IGNORECASE)
+        regex = _get_keyword_regex(keyword)
         match = regex.search(normalized)
         if not match:
             continue
