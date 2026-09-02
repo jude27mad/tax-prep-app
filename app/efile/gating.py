@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Mapping
 
 from app.config import Settings, get_settings
 from app.core.tax_years import SUPPORTED_YEARS
@@ -38,22 +37,9 @@ def can_transmit(year: int, *, settings: Settings | None = None) -> bool:
     return transmit_restriction(year, settings=settings) is None
 
 
-def build_transmit_gate(*, settings: Settings | None = None) -> Mapping[str, dict[str, object]]:
-    resolved = settings or get_settings()
-    gate: dict[str, dict[str, object]] = {}
-    for year in SUPPORTED_YEARS:
-        reason = transmit_restriction(year, settings=resolved)
-        gate[str(year)] = {
-            "allowed": reason is None,
-            "message": reason or "",
-        }
-    return gate
-
-
 __all__ = [
     "CRA_EFILE_INITIAL_YEARS",
     "CRA_REFILING_YEARS",
-    "build_transmit_gate",
     "can_transmit",
     "transmit_restriction",
 ]

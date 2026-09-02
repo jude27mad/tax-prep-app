@@ -27,9 +27,10 @@ from app.i18n import (
     is_supported,
     translate,
 )
+from app.core.tax_years import SUPPORTED_YEARS
 from app.core.validate.pre_submit import validate_return_input
 from app.efile import crypto
-from app.efile.gating import build_transmit_gate
+from app.efile.gating import transmit_restriction
 from app.efile.t183 import RETENTION_YEARS, build_record, mask_sin, store_signed
 from app.ui import slip_ingest
 from app.wizard import (
@@ -229,7 +230,13 @@ def _resolve_settings(request: Request) -> Settings:
 
 
 def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[str, Any]:
-    gate = build_transmit_gate(settings=settings)
+    gate: dict[str, dict[str, object]] = {}
+    for year in SUPPORTED_YEARS:
+        reason = transmit_restriction(year, settings=settings)
+        gate[str(year)] = {
+            "allowed": reason is None,
+            "message": reason or "",
+        }
     selected_year = str(state.get("tax_year", ""))
     entry = gate.get(selected_year, {"allowed": False, "message": ""})
     allowed = bool(entry.get("allowed"))
