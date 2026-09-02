@@ -23,6 +23,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
+import anyio
+from functools import partial
+
 from app.paths import resolve_within
 
 from .estimator import round_cents
@@ -86,6 +89,15 @@ def _trash_dir(user_id: str | None = None) -> Path:
 def _active_pointer(user_id: str | None = None) -> Path:
     return _user_root(user_id) / "active_profile.txt"
 
+
+async def load_profile_async(
+    slug: str | None,
+    *,
+    user_id: str | None = None,
+) -> tuple[dict[str, Any], Path | None, list[str]]:
+    return await anyio.to_thread.run_sync(
+        partial(load_profile, slug, user_id=user_id)
+    )
 
 def load_profile(
     slug: str | None,
@@ -283,6 +295,7 @@ __all__ = [
     "list_profiles",
     "list_trash",
     "load_profile",
+    "load_profile_async",
     "rename_profile",
     "restore_profile",
     "save_profile_data",
