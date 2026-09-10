@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import hashlib
 import io
 import mimetypes
@@ -632,10 +633,8 @@ async def ingest_slip_uploads(
                 created_at=datetime.now(timezone.utc),
             )
             detections.append(det)
-            try:
+            with suppress(Exception):
                 await upload.close()
-            except Exception:
-                pass
             continue
         try:
             status = await store.process_upload(
