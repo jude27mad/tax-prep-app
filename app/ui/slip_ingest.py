@@ -16,9 +16,10 @@ from typing import Any, Iterable, Literal
 from fastapi import UploadFile
 from pydantic import BaseModel, Field, ConfigDict
 from PyPDF2 import PdfReader
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.config import Settings
 from app.db import (
@@ -283,15 +284,13 @@ class SlipStagingStore:
         safe_profile = slugify(profile) or "default"
         async with session_scope(self._factory) as session:
             stmt = (
-                select(DocumentRow)
-                .where(DocumentRow.user_id == user_id)
-                .where(DocumentRow.profile_slug == safe_profile)
-                .where(DocumentRow.tax_year == int(year))
-                .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
+                delete(DocumentRow)
+                .where(col(DocumentRow.user_id) == user_id)
+                .where(col(DocumentRow.profile_slug) == safe_profile)
+                .where(col(DocumentRow.tax_year) == int(year))
+                .where(col(DocumentRow.status) == DocumentStatus.COMPLETE.value)
             )
-            result = await session.execute(stmt)
-            for row in result.scalars().all():
-                await session.delete(row)
+            await session.execute(stmt)
 
 
 _DEFAULT_STORE: SlipStagingStore | None = None
