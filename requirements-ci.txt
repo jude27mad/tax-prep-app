@@ -41,7 +41,7 @@ alembic==1.19.1
 aiosqlite==0.22.1
 sqlmodel==0.0.39
 SQLAlchemy==2.0.52
-pyee==13.0.1
+pyee==14.0.0
 Pygments==2.21.0
 pytesseract==0.3.13
 pytest==9.1.1
