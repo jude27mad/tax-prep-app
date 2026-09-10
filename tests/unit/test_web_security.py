@@ -26,6 +26,7 @@ from app.i18n import LocaleMiddleware
 from app.web_security import (
     CSRFMiddleware,
     SecurityHeadersMiddleware,
+    generate_csrf_token,
     get_csrf_token,
 )
 
@@ -68,6 +69,24 @@ def test_hsts_emitted_only_when_enabled() -> None:
     on = _headers_app(enable_hsts=True).get("/probe")
     assert on.headers["strict-transport-security"].startswith("max-age=")
     assert "includeSubDomains" in on.headers["strict-transport-security"]
+
+
+# ---------------------------------------------------------------------------
+# Token generation unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_generate_csrf_token_format_and_length() -> None:
+    token = generate_csrf_token()
+    assert isinstance(token, str)
+    assert len(token) == 43
+    # Check that token contains only URL-safe base64 characters (alphanumeric, '-', '_')
+    assert re.fullmatch(r"[A-Za-z0-9_-]+", token) is not None
+
+
+def test_generate_csrf_token_uniqueness() -> None:
+    tokens = {generate_csrf_token() for _ in range(100)}
+    assert len(tokens) == 100
 
 
 # ---------------------------------------------------------------------------
