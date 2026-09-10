@@ -24,6 +24,7 @@ from app.auth.email import RecordingEmailBackend
 from app.db import Base, create_session_factory
 from app.i18n import LocaleMiddleware
 from app.web_security import (
+    CSRF_SESSION_KEY,
     CSRFMiddleware,
     SecurityHeadersMiddleware,
     get_csrf_token,
@@ -68,6 +69,37 @@ def test_hsts_emitted_only_when_enabled() -> None:
     on = _headers_app(enable_hsts=True).get("/probe")
     assert on.headers["strict-transport-security"].startswith("max-age=")
     assert "includeSubDomains" in on.headers["strict-transport-security"]
+
+
+# ---------------------------------------------------------------------------
+# get_csrf_token unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_csrf_token_no_session_in_scope() -> None:
+    request = Request(scope={"type": "http"})
+    assert get_csrf_token(request) == ""
+
+
+def test_get_csrf_token_missing_key_in_session() -> None:
+    request = Request(scope={"type": "http", "session": {}})
+    assert get_csrf_token(request) == ""
+
+
+def test_get_csrf_token_non_string_type() -> None:
+    request_int = Request(scope={"type": "http", "session": {CSRF_SESSION_KEY: 12345}})
+    assert get_csrf_token(request_int) == ""
+
+    request_none = Request(scope={"type": "http", "session": {CSRF_SESSION_KEY: None}})
+    assert get_csrf_token(request_none) == ""
+
+    request_list = Request(scope={"type": "http", "session": {CSRF_SESSION_KEY: ["token"]}})
+    assert get_csrf_token(request_list) == ""
+
+
+def test_get_csrf_token_valid_token() -> None:
+    request = Request(scope={"type": "http", "session": {CSRF_SESSION_KEY: "secret-csrf-token"}})
+    assert get_csrf_token(request) == "secret-csrf-token"
 
 
 # ---------------------------------------------------------------------------
