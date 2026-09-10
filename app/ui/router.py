@@ -234,7 +234,7 @@ def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[st
     entry = gate.get(selected_year, {"allowed": False, "message": ""})
     allowed = bool(entry.get("allowed"))
     message = str(entry.get("message", "")) if not allowed else ""
-    years = sorted(int(year) for year in gate.keys())
+    years = sorted(int(year) for year in gate)
     return {
         "supported_tax_years": years,
         "efile_transmit_gate": gate,
@@ -476,7 +476,7 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
     state = base
     taxpayer_saved = saved.get("taxpayer")
     if isinstance(taxpayer_saved, dict):
-        for key in state["taxpayer"].keys():
+        for key in state["taxpayer"]:
             state["taxpayer"][key] = _coerce_text(taxpayer_saved.get(key))
     household_saved = saved.get("household")
     if isinstance(household_saved, dict):
@@ -499,14 +499,14 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
         state["tax_year"] = _coerce_text(saved.get("tax_year"))
     t183_saved = saved.get("t183")
     if isinstance(t183_saved, dict):
-        for key in state["t183"].keys():
+        for key in state["t183"]:
             state["t183"][key] = _coerce_text(t183_saved.get(key))
     outputs_saved = saved.get("outputs")
     if isinstance(outputs_saved, dict) and "out_path" in outputs_saved:
         state["outputs"]["out_path"] = _coerce_text(outputs_saved.get("out_path"))
     efile_saved = saved.get("efile")
     if isinstance(efile_saved, dict):
-        for key in state["efile"].keys():
+        for key in state["efile"]:
             state["efile"][key] = _coerce_text(efile_saved.get(key))
     return state
 
@@ -657,7 +657,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
     efile_state["transmitter_id"] = _form_text(form.get("transmitter_id"))
 
     slip_indices: set[int] = set()
-    for key in form.keys():
+    for key in form:
         if not key.startswith("slips_t4-"):
             continue
         _, maybe_index, *_ = key.split("-", 2)
@@ -1125,7 +1125,7 @@ async def submit_t183_consent(
     user: UserRow = Depends(require_user_web),
 ) -> Response:
     form = await request.form()
-    form_data = {key: _form_text(form.get(key)) for key in form.keys()}
+    form_data = {key: _form_text(form.get(key)) for key in form}
     signature = form_data.get("signature", "").strip()
     confirm = form_data.get("confirm", "")
     if not signature:
@@ -1259,7 +1259,7 @@ async def save_profile(
 ):
     normalized = slugify(slug)
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     data, field_errors = _extract_form_data(form_dict)
     if field_errors:
         context: dict[str, Any] = _profile_context(normalized, data, field_errors, user_id=user.id)
@@ -1276,7 +1276,7 @@ async def preview_profile(
     user: UserRow = Depends(require_user_web),
 ) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     data, errors = _extract_form_data(form_dict)
     preview, preview_errors = _build_preview(data)
     context: dict[str, Any] = {
@@ -1360,7 +1360,7 @@ async def prepare_return(
     user: UserRow = Depends(require_user_web),
 ) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     payload, field_errors, state = _parse_return_form(form_dict)
 
     current_step = _normalize_step(_form_text(form.get("current_step")))
