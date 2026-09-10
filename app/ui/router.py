@@ -234,7 +234,7 @@ def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[st
     entry = gate.get(selected_year, {"allowed": False, "message": ""})
     allowed = bool(entry.get("allowed"))
     message = str(entry.get("message", "")) if not allowed else ""
-    years = sorted(int(year) for year in gate.keys())
+    years = sorted(int(year) for year in gate)
     return {
         "supported_tax_years": years,
         "efile_transmit_gate": gate,
