@@ -16,9 +16,10 @@ from typing import Any, Iterable, Literal
 from fastapi import UploadFile
 from pydantic import BaseModel, Field, ConfigDict
 from PyPDF2 import PdfReader
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.config import Settings
 from app.db import (
@@ -249,14 +250,22 @@ class SlipStagingStore:
                 .where(DocumentRow.tax_year == int(year))
                 .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
             )
+
+            if detection_ids is not None:
+                requested = list(detection_ids)
+                if not requested:
+                    return []
+                stmt = stmt.where(col(DocumentRow.id).in_(set(requested)))
+            else:
+                requested = None
+
             result = await session.execute(stmt)
             rows = list(result.scalars().all())
             by_id = {row.id: row for row in rows}
 
-            if detection_ids is None:
+            if requested is None:
                 selected = list(rows)
             else:
-                requested = list(detection_ids)
                 selected = []
                 for detection_id in requested:
                     row = by_id.get(detection_id)
@@ -266,10 +275,15 @@ class SlipStagingStore:
                         )
                     selected.append(row)
 
-            applied: list[SlipDetection] = []
-            for row in selected:
-                applied.append(_detection_from_row(row))
-                row.status = DocumentStatus.APPLIED.value
+            applied = [_detection_from_row(row) for row in selected]
+
+            if selected:
+                selected_ids = list({row.id for row in selected})
+                await session.execute(
+                    update(DocumentRow)
+                    .where(col(DocumentRow.id).in_(selected_ids))
+                    .values(status=DocumentStatus.APPLIED.value)
+                )
 
             return applied
 
