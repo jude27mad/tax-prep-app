@@ -53,6 +53,17 @@ NUM_SUFFIXES = {
     "b": 1_000_000_000.0,
 }
 
+_NUMBER_CLEANUP_TRANS = str.maketrans(
+    {
+        "$": None,
+        ",": None,
+        " ": None,
+        "_": None,
+        "−": "-",
+        "–": "-",
+    }
+)
+
 _KEY_VALUE_RE = re.compile(r"^\s*([^#:=]+?)\s*(?:[:=]|->)\s*(.+)$")
 _ALIAS_LOOKUP: dict[str, str] = {}
 _ALIAS_MATCHERS: list[tuple[str, str]] = []
@@ -90,8 +101,7 @@ def parse_number(text: str) -> float:
     if suffix in NUM_SUFFIXES:
         multiplier = NUM_SUFFIXES[suffix]
         cleaned = cleaned[:-1]
-    cleaned = cleaned.replace("$", "").replace(",", "").replace(" ", "").replace("_", "")
-    cleaned = cleaned.replace("−", "-").replace("–", "-")
+    cleaned = cleaned.translate(_NUMBER_CLEANUP_TRANS)
     if cleaned in {"", "-", "."}:
         raise ValueError("Please enter a number.")
     try:
