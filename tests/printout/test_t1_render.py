@@ -10,7 +10,7 @@ import zlib
 import pytest
 
 from app.config import get_settings
-from app.printout.t1_render import render_t1_pdf
+from app.printout.t1_render import render_t1_pdf, _sum_decimals
 from app.core.models import (
     ReturnCalc,
     ReturnInput,
@@ -237,3 +237,28 @@ def test_render_t1_pdf_respects_explicit_filename(tmp_path, monkeypatch):
 
     assert pdf_path == explicit
     assert pdf_path.exists()
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ([], Decimal("0.00")),
+        ((), Decimal("0.00")),
+        ([None], Decimal("0.00")),
+        ([None, None], Decimal("0.00")),
+        ([Decimal("123.45")], Decimal("123.45")),
+        ([Decimal("100.50"), None, Decimal("200.25")], Decimal("300.75")),
+        ([10, "20.5", Decimal("5.25")], Decimal("35.75")),
+        ([-10, Decimal("15.50")], Decimal("5.50")),
+        ([None, 0, None, Decimal("0.00")], Decimal("0.00")),
+    ],
+)
+def test_sum_decimals(values, expected):
+    result = _sum_decimals(values)
+    assert result == expected
+    assert isinstance(result, Decimal)
+
+
+def test_sum_decimals_generator_input():
+    gen = (val for val in [Decimal("10.00"), None, Decimal("20.00")])
+    assert _sum_decimals(gen) == Decimal("30.00")
