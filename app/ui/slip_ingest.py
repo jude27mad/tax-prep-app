@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import hashlib
 import io
 import mimetypes
@@ -493,10 +494,8 @@ def _perform_pdf_ocr(images: Iterable[Any]) -> list[str]:
         finally:
             closer = getattr(image, "close", None)
             if callable(closer):
-                try:
+                with suppress(Exception):
                     closer()
-                except Exception:
-                    pass
     return texts
 
 
@@ -632,10 +631,8 @@ async def ingest_slip_uploads(
                 created_at=datetime.now(timezone.utc),
             )
             detections.append(det)
-            try:
+            with suppress(Exception):
                 await upload.close()
-            except Exception:
-                pass
             continue
         try:
             status = await store.process_upload(
