@@ -111,3 +111,31 @@ async def test_ingest_scanned_pdf_triggers_ocr(monkeypatch):
     fields = detection.fields
     assert fields["employment_income"] == "55123.45"
     assert fields["tax_deducted"] == "8765.43"
+
+
+def test_perform_pdf_ocr_closes_images_and_suppresses_exceptions(monkeypatch):
+    from app.ui.slip_ingest import _perform_pdf_ocr
+
+    class MockImage:
+        def __init__(self, fail_on_close: bool = False):
+            self.fail_on_close = fail_on_close
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+            if self.fail_on_close:
+                raise RuntimeError("Failed to close image")
+
+    img1 = MockImage(fail_on_close=False)
+    img2 = MockImage(fail_on_close=True)
+
+    def fake_image_to_string(img):  # type: ignore[no-untyped-def]
+        return f"text for {id(img)}"
+
+    monkeypatch.setattr("pytesseract.image_to_string", fake_image_to_string)
+
+    results = _perform_pdf_ocr([img1, img2])
+
+    assert len(results) == 2
+    assert img1.closed
+    assert img2.closed
