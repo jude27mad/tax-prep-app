@@ -28,9 +28,11 @@ DEFAULT_LOCALE = "en"
 SUPPORTED_LOCALES: tuple[str, ...] = ("en", "fr")
 
 _DEFAULT_CATALOGS_ROOT = Path(__file__).resolve().parent / "catalogs"
+_DEFAULT_CATALOGS_ROOT_STR = str(_DEFAULT_CATALOGS_ROOT)
 
 # Keyed by (catalogs_root_str, locale). Clearing by reload_catalogs() wipes all.
 _CACHE: dict[tuple[str, str], dict[str, str]] = {}
+_MISSING_CACHE: set[tuple[str, str]] = set()
 
 
 def is_supported(code: str | None) -> bool:
@@ -61,14 +63,21 @@ def catalog_for(locale: str, catalogs_root: Path | None = None) -> dict[str, str
     Raises FileNotFoundError if the catalog file does not exist. Callers
     that want soft-fallback to default should use :func:`translate`.
     """
-    root = catalogs_root or _DEFAULT_CATALOGS_ROOT
-    key = (str(root), locale)
+    root_str = str(catalogs_root) if catalogs_root is not None else _DEFAULT_CATALOGS_ROOT_STR
+    key = (root_str, locale)
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
 
+    if key in _MISSING_CACHE:
+        raise FileNotFoundError(
+            f"i18n catalog for locale '{locale}' not found at {root_str}/{locale}.json"
+        )
+
+    root = catalogs_root if catalogs_root is not None else _DEFAULT_CATALOGS_ROOT
     path = root / f"{locale}.json"
     if not path.exists():
+        _MISSING_CACHE.add(key)
         raise FileNotFoundError(f"i18n catalog for locale '{locale}' not found at {path}")
     with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
@@ -91,6 +100,7 @@ def catalog_for(locale: str, catalogs_root: Path | None = None) -> dict[str, str
 def reload_catalogs() -> None:
     """Drop the in-memory cache. Intended for tests and dev reload."""
     _CACHE.clear()
+    _MISSING_CACHE.clear()
 
 
 class _SafeDict(dict[str, Any]):
