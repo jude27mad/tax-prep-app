@@ -28,7 +28,7 @@ def test_session_secret_prod_missing_raises(monkeypatch):
     monkeypatch.setenv("EFILE_ENV", "prod")
     monkeypatch.delenv("AUTH_SESSION_SECRET", raising=False)
     get_settings.cache_clear()
-    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be explicitly set in PROD"):
+    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be set to a secure value"):
         Settings()
     get_settings.cache_clear()
 
@@ -37,7 +37,7 @@ def test_session_secret_prod_insecure_default_raises(monkeypatch):
     monkeypatch.setenv("EFILE_ENV", "prod")
     monkeypatch.setenv("AUTH_SESSION_SECRET", "dev-only-change-me-do-not-use-in-prod")
     get_settings.cache_clear()
-    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be explicitly set in PROD"):
+    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be set to a secure value"):
         Settings()
     get_settings.cache_clear()
 
@@ -51,17 +51,26 @@ def test_session_secret_prod_valid_succeeds(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_session_secret_cert_default_random(monkeypatch):
+def test_session_secret_prod_valid_constructor_value_succeeds(monkeypatch):
+    monkeypatch.setenv("EFILE_ENV", "prod")
+    monkeypatch.delenv("AUTH_SESSION_SECRET", raising=False)
+    settings = Settings(session_secret="constructor-provided-secure-secret")
+    assert settings.session_secret == "constructor-provided-secure-secret"
+
+
+def test_session_secret_prod_valid_env_does_not_mask_insecure_constructor(monkeypatch):
+    monkeypatch.setenv("EFILE_ENV", "prod")
+    monkeypatch.setenv("AUTH_SESSION_SECRET", "secure-environment-secret")
+    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be set to a secure value"):
+        Settings(session_secret="dev-only-change-me-do-not-use-in-prod")
+
+
+def test_session_secret_cert_missing_raises(monkeypatch):
     monkeypatch.setenv("EFILE_ENV", "cert")
     monkeypatch.delenv("AUTH_SESSION_SECRET", raising=False)
     get_settings.cache_clear()
-    settings1 = Settings()
-    get_settings.cache_clear()
-    settings2 = Settings()
-    assert settings1.session_secret
-    assert settings2.session_secret
-    # Random tokens generated dynamically without hardcoded fallback
-    assert len(settings1.session_secret) >= 16
+    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be set to a secure value"):
+        Settings()
     get_settings.cache_clear()
 
 

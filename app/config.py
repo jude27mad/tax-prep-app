@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal, cast
@@ -10,6 +9,7 @@ from pydantic import BaseModel, Field
 from pydantic import ConfigDict, field_validator, model_validator
 
 ENV_BOOL_TRUE = {"1", "true", "yes", "on"}
+INSECURE_SESSION_SECRET = "dev-only-change-me-do-not-use-in-prod"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -23,8 +23,6 @@ def _env_env() -> Literal["CERT", "PROD"]:
     upper = os.getenv("EFILE_ENV", "CERT").upper()
     normalized = upper if upper in {"CERT", "PROD"} else "CERT"
     return cast(Literal["CERT", "PROD"], normalized)
-
-
 
 
 @dataclass(frozen=True)
@@ -69,11 +67,11 @@ class Settings(BaseModel):
     database_url: str | None = Field(default_factory=lambda: os.getenv("DATABASE_URL"))
     db_path: str = Field(default_factory=lambda: os.getenv("DB_PATH", "tax_app.db"))
 
-    # D1.4 — magic-link auth. session_secret is MANDATORY in prod; in dev/CERT
-    # if not explicitly set, a random secret key is generated at startup.
-    # auth_email_backend picks the transport (console only for Phase 1; smtp/provider adapters land later).
+    # D1.4 — magic-link auth. Every runtime must provide one deployment-wide
+    # key through AUTH_SESSION_SECRET. This keeps cookies valid across workers
+    # and restarts without writing signing material to the filesystem.
     session_secret: str = Field(
-        default_factory=lambda: os.getenv("AUTH_SESSION_SECRET") or secrets.token_urlsafe(32)
+        default_factory=lambda: os.getenv("AUTH_SESSION_SECRET", "")
     )
     # Marks the session cookie ``Secure`` (HTTPS-only) and turns on HSTS.
     # Defaults on in PROD (EFILE_ENV=PROD) so prod boots refuse to ship the
@@ -202,11 +200,10 @@ class Settings(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _require_session_secret_in_prod(self) -> "Settings":
-        if self.efile_environment == "PROD":
-            env_val = os.getenv("AUTH_SESSION_SECRET")
-            if not env_val or not env_val.strip() or "change-me" in env_val:
-                raise ValueError("AUTH_SESSION_SECRET must be explicitly set in PROD environment.")
+    def _require_secure_session_secret(self) -> "Settings":
+        secret = self.session_secret.strip()
+        if not secret or secret == INSECURE_SESSION_SECRET:
+            raise ValueError("AUTH_SESSION_SECRET must be set to a secure value.")
         return self
 
     @model_validator(mode="after")

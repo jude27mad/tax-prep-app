@@ -5,7 +5,6 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
-.dev_session_secret*
 *.pyc
 *.pyo
 *.pyd
