@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import SplitResult, urlsplit
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -134,12 +135,35 @@ AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
 
 
-def _sanitize_redirect(target: str | None) -> str:
-    if not target or not target.startswith("/"):
+def _origin(url: SplitResult) -> tuple[str, str, int | None] | None:
+    """Return a normalized URL origin, or ``None`` for malformed URLs."""
+    try:
+        scheme = url.scheme.casefold()
+        hostname = url.hostname.casefold() if url.hostname else ""
+        port = url.port
+    except ValueError:
+        return None
+    if not scheme or not hostname:
+        return None
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, hostname, port
+
+
+def _sanitize_redirect(target: str | None, request: Request) -> str:
+    if not target:
         return "/ui/"
-    if target.startswith("//") or target.startswith("/\\"):
+    try:
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc:
+            if _origin(parsed) != _origin(urlsplit(str(request.url))):
+                return "/ui/"
+        path = parsed.path or "/"
+    except ValueError:
         return "/ui/"
-    return target
+    if not path.startswith("/") or path.startswith("//") or path.startswith("/\\"):
+        return "/ui/"
+    return path + (f"?{parsed.query}" if parsed.query else "")
 
 
 @router.post("/locale/{code}", name="ui_set_locale")
@@ -148,7 +172,7 @@ async def set_locale(code: str, request: Request) -> RedirectResponse:
     redirect back to the referring page (or ``/ui/`` if no referer)."""
     if not is_supported(code):
         raise HTTPException(status_code=400, detail=f"Unsupported locale: {code!r}")
-    target = _sanitize_redirect(request.headers.get("referer"))
+    target = _sanitize_redirect(request.headers.get("referer"), request)
     response = RedirectResponse(url=target, status_code=303)
     response.set_cookie(
         key=LOCALE_COOKIE_NAME,
