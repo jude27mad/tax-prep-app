@@ -36,9 +36,9 @@ def test_friendly_path_outside_base_dir_absolute():
 
 
 def test_friendly_path_root():
-    """Root directory '/' returns '/'."""
+    """The filesystem root uses the platform-native path spelling."""
     root = Path("/")
-    assert _friendly_path(root) == "/"
+    assert _friendly_path(root) == str(root)
 
 
 def test_friendly_path_unanchored_relative():
