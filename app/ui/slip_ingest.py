@@ -256,7 +256,7 @@ class SlipStagingStore:
                 if not requested:
                     return []
                 requested_unique = list(set(requested))
-                rows = []
+                rows: list[DocumentRow] = []
                 for i in range(0, len(requested_unique), 500):
                     chunk = requested_unique[i : i + 500]
                     chunk_stmt = stmt.where(col(DocumentRow.id).in_(chunk))
