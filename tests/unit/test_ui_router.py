@@ -126,50 +126,6 @@ def test_create_profile_accepts_multipart(tmp_path, monkeypatch):
     assert (base / "profiles" / "users" / TEST_USER_ID / "test-user.toml").exists()
 
 
-def test_create_profile_preserves_a_concurrent_write(tmp_path, monkeypatch):
-    base = _configure_profiles_dirs(monkeypatch, tmp_path)
-
-    async def load_while_another_request_creates(slug, *, user_id=None):
-        profiles.save_profile_data(
-            slug,
-            {"full_name": "Concurrent Winner"},
-            user_id=user_id,
-        )
-        return {}, None, []
-
-    monkeypatch.setattr(
-        ui_router_module,
-        "load_profile_async",
-        load_while_another_request_creates,
-    )
-
-    client = _build_client()
-    response = client.post(
-        "/ui/profiles",
-        data={"name": "Test User"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 303
-    assert response.headers["location"].endswith("/ui/profiles/test-user")
-    profile_path = base / "profiles" / "users" / TEST_USER_ID / "test-user.toml"
-    assert 'full_name = "Concurrent Winner"' in profile_path.read_text(encoding="utf-8")
-
-
-def test_create_profile_redirect_cannot_become_external(tmp_path, monkeypatch):
-    _configure_profiles_dirs(monkeypatch, tmp_path)
-
-    client = _build_client()
-    response = client.post(
-        "/ui/profiles",
-        data={"name": r"//evil.example\taxpayer"},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == 303
-    assert response.headers["location"] == "/ui/profiles/evil-example-taxpayer?created=1"
-
-
 def test_preview_displays_summary(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
 

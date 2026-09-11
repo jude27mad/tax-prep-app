@@ -40,7 +40,6 @@ from app.wizard import (
     CLI_SUBMIT_FIELDS,
     T4EstimateRequest,
     coerce_for_field,
-    create_profile_if_missing_async,
     delete_profile,
     estimate_from_t4,
     get_active_profile,
@@ -134,13 +133,21 @@ AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
 
 
+def _sanitize_redirect(target: str | None) -> str:
+    if not target or not target.startswith("/"):
+        return "/ui/"
+    if target.startswith("//") or target.startswith("/\\"):
+        return "/ui/"
+    return target
+
+
 @router.post("/locale/{code}", name="ui_set_locale")
 async def set_locale(code: str, request: Request) -> RedirectResponse:
     """Persist the user's locale choice in the ``locale`` cookie and
     redirect back to the referring page (or ``/ui/`` if no referer)."""
     if not is_supported(code):
         raise HTTPException(status_code=400, detail=f"Unsupported locale: {code!r}")
-    target = request.headers.get("referer") or "/ui/"
+    target = _sanitize_redirect(request.headers.get("referer"))
     response = RedirectResponse(url=target, status_code=303)
     response.set_cookie(
         key=LOCALE_COOKIE_NAME,
@@ -951,15 +958,13 @@ async def create_profile(
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
     slug = slugify(name)
-    profile_path = request.app.url_path_for("ui_edit_profile", slug=slug)
     data, _, load_errors = await load_profile_async(slug, user_id=user.id)
     if load_errors:
         raise HTTPException(status_code=400, detail="Unable to load existing profile state.")
     if data:
-        return RedirectResponse(url=str(profile_path), status_code=303)
-    _, created = await create_profile_if_missing_async(slug, user_id=user.id)
-    suffix = "?created=1" if created else ""
-    return RedirectResponse(url=f"{profile_path}{suffix}", status_code=303)
+        return RedirectResponse(url=f"/ui/profiles/{slug}", status_code=303)
+    save_profile_data(slug, {}, user_id=user.id)
+    return RedirectResponse(url=f"/ui/profiles/{slug}?created=1", status_code=303)
 
 
 @router.post("/profiles/{slug}/set-active", response_class=RedirectResponse)
@@ -1229,11 +1234,7 @@ def download_t183_record(
     raise HTTPException(status_code=404, detail="Record not found")
 
 
-@router.get(
-    "/profiles/{slug}",
-    response_class=HTMLResponse,
-    name="ui_edit_profile",
-)
+@router.get("/profiles/{slug}", response_class=HTMLResponse)
 def edit_profile(
     request: Request,
     slug: str,
