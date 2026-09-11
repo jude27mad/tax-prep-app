@@ -2,8 +2,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .env
-.auth_session_secret
-.auth_session_secret.lock/
 .DS_Store
 .idea/
 .vscode/
