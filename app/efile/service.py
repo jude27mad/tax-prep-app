@@ -8,7 +8,8 @@ import secrets
 import string
 from typing import Any
 from pathlib import Path
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from fastapi import FastAPI, HTTPException
 
@@ -217,7 +218,7 @@ def prepare_xml_submission(
 def validate_t619_preflight(package: T619Package) -> list[str]:
     try:
         root = ET.fromstring(package.envelope_xml)
-    except ET.ParseError:
+    except (ET.ParseError, DefusedXmlException):
         return ["T619 envelope XML is malformed"]
 
     def _value(tag: str) -> str:

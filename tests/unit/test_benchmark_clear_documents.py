@@ -22,17 +22,17 @@ from app.ui.slip_ingest import SlipStagingStore
 
 @pytest_asyncio.fixture
 async def engine() -> AsyncEngine:
-    eng = create_async_engine(
+    engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     try:
-        yield eng
+        yield engine
     finally:
-        await eng.dispose()
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -92,7 +92,9 @@ async def test_clear_uses_one_scoped_delete(engine: AsyncEngine) -> None:
         event.remove(engine.sync_engine, "before_cursor_execute", record_delete)
 
     async with session_scope(factory) as session:
-        remaining_ids = set((await session.execute(select(DocumentRow.id))).scalars())
+        remaining_ids = set(
+            (await session.execute(select(DocumentRow.id))).scalars()
+        )
 
     assert remaining_ids == preserved_ids
     assert len(delete_statements) == 1
