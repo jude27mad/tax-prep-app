@@ -24,6 +24,7 @@ from app.auth.email import RecordingEmailBackend
 from app.db import Base, create_session_factory
 from app.i18n import LocaleMiddleware
 from app.web_security import (
+    CSRF_SESSION_KEY,
     CSRFMiddleware,
     SecurityHeadersMiddleware,
     generate_csrf_token,
@@ -96,6 +97,39 @@ def test_generate_csrf_token_batch_is_unique_lowercase_hex() -> None:
 
     assert len(tokens) == 100
     assert all(re.fullmatch(r"[0-9a-f]{64}", token) for token in tokens)
+
+
+# ---------------------------------------------------------------------------
+# Token lookup
+# ---------------------------------------------------------------------------
+
+
+def test_get_csrf_token_without_session() -> None:
+    request = Request(scope={"type": "http"})
+    assert get_csrf_token(request) == ""
+
+
+def test_get_csrf_token_without_session_key() -> None:
+    request = Request(scope={"type": "http", "session": {}})
+    assert get_csrf_token(request) == ""
+
+
+@pytest.mark.parametrize("value", [12345, None, ["token"]])
+def test_get_csrf_token_rejects_non_string_values(value: object) -> None:
+    request = Request(
+        scope={"type": "http", "session": {CSRF_SESSION_KEY: value}}
+    )
+    assert get_csrf_token(request) == ""
+
+
+def test_get_csrf_token_returns_valid_session_token() -> None:
+    request = Request(
+        scope={
+            "type": "http",
+            "session": {CSRF_SESSION_KEY: "secret-csrf-token"},
+        }
+    )
+    assert get_csrf_token(request) == "secret-csrf-token"
 
 
 # ---------------------------------------------------------------------------
