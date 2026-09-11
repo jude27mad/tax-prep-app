@@ -275,7 +275,7 @@ def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[st
     entry = gate.get(selected_year, {"allowed": False, "message": ""})
     allowed = bool(entry.get("allowed"))
     message = str(entry.get("message", "")) if not allowed else ""
-    years = sorted(int(year) for year in gate.keys())
+    years = sorted(int(year) for year in gate)
     return {
         "supported_tax_years": years,
         "efile_transmit_gate": gate,
@@ -669,7 +669,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
     state = _default_return_form_state()
     taxpayer_state = state["taxpayer"]
     household_state = state["household"]
-    for field in list(taxpayer_state.keys()):
+    for field in list(taxpayer_state):
         if field == "province":
             taxpayer_state[field] = _form_text(form.get(f"taxpayer_{field}")) or taxpayer_state[field]
         else:
@@ -698,7 +698,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
     efile_state["transmitter_id"] = _form_text(form.get("transmitter_id"))
 
     slip_indices: set[int] = set()
-    for key in form.keys():
+    for key in form:
         if not key.startswith("slips_t4-"):
             continue
         _, maybe_index, *_ = key.split("-", 2)
@@ -1168,7 +1168,7 @@ async def submit_t183_consent(
     user: UserRow = Depends(require_user_web),
 ) -> Response:
     form = await request.form()
-    form_data = {key: _form_text(form.get(key)) for key in form.keys()}
+    form_data = {key: _form_text(form.get(key)) for key in form}
     signature = form_data.get("signature", "").strip()
     confirm = form_data.get("confirm", "")
     if not signature:
@@ -1306,7 +1306,7 @@ async def save_profile(
 ):
     normalized = slugify(slug)
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     data, field_errors = _extract_form_data(form_dict)
     if field_errors:
         context: dict[str, Any] = _profile_context(normalized, data, field_errors, user_id=user.id)
@@ -1323,7 +1323,7 @@ async def preview_profile(
     user: UserRow = Depends(require_user_web),
 ) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     data, errors = _extract_form_data(form_dict)
     preview, preview_errors = _build_preview(data)
     context: dict[str, Any] = {
@@ -1407,7 +1407,7 @@ async def prepare_return(
     user: UserRow = Depends(require_user_web),
 ) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     payload, field_errors, state = _parse_return_form(form_dict)
 
     current_step = _normalize_step(_form_text(form.get("current_step")))
