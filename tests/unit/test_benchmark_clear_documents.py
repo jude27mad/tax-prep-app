@@ -1,15 +1,10 @@
-"""Benchmark document deletion in SlipStagingStore.clear.
-
-Measures the performance difference between N+1 row-by-row deletion and
-single SQL DELETE statement bulk deletion.
-"""
+"""Deterministic regression coverage for bulk staged-document deletion."""
 
 from __future__ import annotations
 
-import time
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import select
@@ -20,7 +15,9 @@ from app.db import (
     DocumentSource,
     DocumentStatus,
     create_session_factory,
+    session_scope,
 )
+from app.ui.slip_ingest import SlipStagingStore
 
 
 @pytest_asyncio.fixture
@@ -39,79 +36,65 @@ async def engine() -> AsyncEngine:
 
 
 @pytest.mark.asyncio
-async def test_benchmark_bulk_delete_speedup(engine: AsyncEngine) -> None:
+async def test_clear_uses_one_scoped_delete(engine: AsyncEngine) -> None:
     factory = create_session_factory(engine)
-    num_rows = 300
+    target_ids = [f"target-{index}" for index in range(25)]
+    preserved_ids = {"already-applied", "other-profile", "other-user", "other-year"}
 
-    # Populate rows for old method benchmark
-    async with factory() as session:
-        for i in range(num_rows):
-            session.add(
-                DocumentRow(
-                    id=f"old_doc_{i}",
-                    user_id="user_bench",
-                    profile_slug="bench_profile",
-                    tax_year=2025,
-                    source_type=DocumentSource.UPLOAD.value,
-                    status=DocumentStatus.COMPLETE.value,
-                    slip_type="t4",
-                    original_filename=f"file_{i}.pdf",
-                )
-            )
-        await session.commit()
-
-    # Time old method (N+1 select + session.delete loop)
-    t0 = time.perf_counter()
-    async with factory() as session:
-        stmt = (
-            select(DocumentRow)
-            .where(DocumentRow.user_id == "user_bench")
-            .where(DocumentRow.profile_slug == "bench_profile")
-            .where(DocumentRow.tax_year == 2025)
-            .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
+    def row(
+        row_id: str,
+        *,
+        user_id: str = "user-bench",
+        profile_slug: str = "bench-profile",
+        tax_year: int = 2025,
+        status: str = DocumentStatus.COMPLETE.value,
+    ) -> DocumentRow:
+        return DocumentRow(
+            id=row_id,
+            user_id=user_id,
+            profile_slug=profile_slug,
+            tax_year=tax_year,
+            source_type=DocumentSource.UPLOAD.value,
+            status=status,
+            slip_type="t4",
+            original_filename=f"{row_id}.pdf",
         )
-        result = await session.execute(stmt)
-        for row in result.scalars().all():
-            await session.delete(row)
-        await session.commit()
-    t1 = time.perf_counter()
-    old_duration = t1 - t0
 
-    # Populate rows for new method benchmark
-    async with factory() as session:
-        for i in range(num_rows):
-            session.add(
-                DocumentRow(
-                    id=f"new_doc_{i}",
-                    user_id="user_bench",
-                    profile_slug="bench_profile",
-                    tax_year=2025,
-                    source_type=DocumentSource.UPLOAD.value,
-                    status=DocumentStatus.COMPLETE.value,
-                    slip_type="t4",
-                    original_filename=f"file_{i}.pdf",
-                )
-            )
-        await session.commit()
-
-    # Time bulk delete query
-    t0 = time.perf_counter()
-    async with factory() as session:
-        stmt = (
-            delete(DocumentRow)
-            .where(DocumentRow.user_id == "user_bench")
-            .where(DocumentRow.profile_slug == "bench_profile")
-            .where(DocumentRow.tax_year == 2025)
-            .where(DocumentRow.status == DocumentStatus.COMPLETE.value)
+    async with session_scope(factory) as session:
+        session.add_all([row(row_id) for row_id in target_ids])
+        session.add_all(
+            [
+                row("already-applied", status=DocumentStatus.APPLIED.value),
+                row("other-profile", profile_slug="someone-else"),
+                row("other-user", user_id="different-user"),
+                row("other-year", tax_year=2024),
+            ]
         )
-        await session.execute(stmt)
-        await session.commit()
-    t1 = time.perf_counter()
-    new_duration = t1 - t0
 
-    speedup = old_duration / new_duration if new_duration > 0 else 0
-    print(f"\n[Benchmark] Old approach ({num_rows} rows): {old_duration * 1000:.2f} ms")
-    print(f"[Benchmark] Bulk delete ({num_rows} rows): {new_duration * 1000:.2f} ms")
-    print(f"[Benchmark] Speedup: {speedup:.2f}x")
+    delete_statements: list[str] = []
 
-    assert new_duration < old_duration, "Bulk delete should be faster than N+1 deletion"
+    def record_delete(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        if statement.lstrip().upper().startswith("DELETE FROM DOCUMENTS"):
+            delete_statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_delete)
+    try:
+        store = SlipStagingStore(factory)
+        await store.clear("bench-profile", 2025, user_id="user-bench")
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_delete)
+
+    async with session_scope(factory) as session:
+        remaining_ids = set((await session.execute(select(DocumentRow.id))).scalars())
+
+    assert remaining_ids == preserved_ids
+    assert len(delete_statements) == 1
+    assert "documents.profile_slug" in delete_statements[0]
+    assert "documents.status" in delete_statements[0]
