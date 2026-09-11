@@ -36,7 +36,7 @@ def test_friendly_path_outside_base_dir_absolute():
 
 
 def test_friendly_path_root():
-    """The filesystem root uses the platform-native path spelling."""
+    """Root directory returns str(root)."""
     root = Path("/")
     assert _friendly_path(root) == str(root)
 
