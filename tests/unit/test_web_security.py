@@ -91,6 +91,13 @@ def test_generate_csrf_token() -> None:
     int(token2, 16)
 
 
+def test_generate_csrf_token_batch_is_unique_lowercase_hex() -> None:
+    tokens = {generate_csrf_token() for _ in range(100)}
+
+    assert len(tokens) == 100
+    assert all(re.fullmatch(r"[0-9a-f]{64}", token) for token in tokens)
+
+
 # ---------------------------------------------------------------------------
 # CSRF
 # ---------------------------------------------------------------------------
