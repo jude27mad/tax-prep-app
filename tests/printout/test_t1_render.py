@@ -10,7 +10,7 @@ import zlib
 import pytest
 
 from app.config import get_settings
-from app.printout.t1_render import render_t1_pdf
+from app.printout.t1_render import render_t1_pdf, _sanitize_segment
 from app.core.models import (
     ReturnCalc,
     ReturnInput,
@@ -237,3 +237,26 @@ def test_render_t1_pdf_respects_explicit_filename(tmp_path, monkeypatch):
 
     assert pdf_path == explicit
     assert pdf_path.exists()
+
+
+@pytest.mark.parametrize(
+    "input_val, expected",
+    [
+        ("Lovelace", "lovelace"),
+        ("SMITH", "smith"),
+        ("  Jane  ", "jane"),
+        ("John Smith", "john-smith"),
+        ("O'Connor", "o-connor"),
+        ("St. John-Smythe!", "st-john-smythe"),
+        ("Foo--Bar__Baz$$Qux", "foo-bar-baz-qux"),
+        ("Player123", "player123"),
+        ("999", "999"),
+        ("", "taxpayer"),
+        ("   ", "taxpayer"),
+        ("!@#$%^&*()", "taxpayer"),
+        ("---", "taxpayer"),
+        (" - - - ", "taxpayer"),
+    ],
+)
+def test_sanitize_segment(input_val: str, expected: str):
+    assert _sanitize_segment(input_val) == expected
