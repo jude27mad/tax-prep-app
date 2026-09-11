@@ -72,21 +72,30 @@ def test_hsts_emitted_only_when_enabled() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Token generation unit tests
+# Token Generation
 # ---------------------------------------------------------------------------
 
+def test_generate_csrf_token() -> None:
+    token1 = generate_csrf_token()
+    token2 = generate_csrf_token()
 
-def test_generate_csrf_token_format_and_length() -> None:
-    token = generate_csrf_token()
-    assert isinstance(token, str)
-    assert len(token) == 43
-    # Check that token contains only URL-safe base64 characters (alphanumeric, '-', '_')
-    assert re.fullmatch(r"[A-Za-z0-9_-]+", token) is not None
+    # Check that tokens are unique
+    assert token1 != token2
+
+    # Check that token length matches expected hex representation of 32 bytes (64 chars)
+    assert len(token1) == 64
+    assert len(token2) == 64
+
+    # Verify it's a valid hex string
+    int(token1, 16)
+    int(token2, 16)
 
 
-def test_generate_csrf_token_uniqueness() -> None:
+def test_generate_csrf_token_batch_is_unique_lowercase_hex() -> None:
     tokens = {generate_csrf_token() for _ in range(100)}
+
     assert len(tokens) == 100
+    assert all(re.fullmatch(r"[0-9a-f]{64}", token) for token in tokens)
 
 
 # ---------------------------------------------------------------------------

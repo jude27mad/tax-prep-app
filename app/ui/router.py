@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import SplitResult, urlsplit
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -27,9 +28,10 @@ from app.i18n import (
     is_supported,
     translate,
 )
+from app.core.tax_years import SUPPORTED_YEARS
 from app.core.validate.pre_submit import validate_return_input
 from app.efile import crypto
-from app.efile.gating import build_transmit_gate
+from app.efile.gating import transmit_restriction
 from app.efile.t183 import RETENTION_YEARS, build_record, mask_sin, store_signed
 from app.ui import slip_ingest
 from app.wizard import (
@@ -40,12 +42,14 @@ from app.wizard import (
     CLI_SUBMIT_FIELDS,
     T4EstimateRequest,
     coerce_for_field,
+    create_profile_if_missing_async,
     delete_profile,
     estimate_from_t4,
     get_active_profile,
     list_profiles,
     list_trash,
     load_profile,
+    load_profile_async,
     rename_profile,
     restore_profile,
     save_profile_data,
@@ -132,13 +136,44 @@ AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
 
 
+def _origin(url: SplitResult) -> tuple[str, str, int | None] | None:
+    """Return a normalized URL origin, or ``None`` for malformed URLs."""
+    try:
+        scheme = url.scheme.casefold()
+        hostname = url.hostname.casefold() if url.hostname else ""
+        port = url.port
+    except ValueError:
+        return None
+    if not scheme or not hostname:
+        return None
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, hostname, port
+
+
+def _sanitize_redirect(target: str | None, request: Request) -> str:
+    if not target:
+        return "/ui/"
+    try:
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc:
+            if _origin(parsed) != _origin(urlsplit(str(request.url))):
+                return "/ui/"
+        path = parsed.path or "/"
+    except ValueError:
+        return "/ui/"
+    if not path.startswith("/") or path.startswith("//") or path.startswith("/\\"):
+        return "/ui/"
+    return path + (f"?{parsed.query}" if parsed.query else "")
+
+
 @router.post("/locale/{code}", name="ui_set_locale")
 async def set_locale(code: str, request: Request) -> RedirectResponse:
     """Persist the user's locale choice in the ``locale`` cookie and
     redirect back to the referring page (or ``/ui/`` if no referer)."""
     if not is_supported(code):
         raise HTTPException(status_code=400, detail=f"Unsupported locale: {code!r}")
-    target = request.headers.get("referer") or "/ui/"
+    target = _sanitize_redirect(request.headers.get("referer"), request)
     response = RedirectResponse(url=target, status_code=303)
     response.set_cookie(
         key=LOCALE_COOKIE_NAME,
@@ -229,12 +264,18 @@ def _resolve_settings(request: Request) -> Settings:
 
 
 def _transmit_gate_context(state: dict[str, Any], settings: Settings) -> dict[str, Any]:
-    gate = build_transmit_gate(settings=settings)
+    gate: dict[str, dict[str, object]] = {}
+    for year in SUPPORTED_YEARS:
+        reason = transmit_restriction(year, settings=settings)
+        gate[str(year)] = {
+            "allowed": reason is None,
+            "message": reason or "",
+        }
     selected_year = str(state.get("tax_year", ""))
     entry = gate.get(selected_year, {"allowed": False, "message": ""})
     allowed = bool(entry.get("allowed"))
     message = str(entry.get("message", "")) if not allowed else ""
-    years = sorted(int(year) for year in gate.keys())
+    years = sorted(int(year) for year in gate)
     return {
         "supported_tax_years": years,
         "efile_transmit_gate": gate,
@@ -476,7 +517,7 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
     state = base
     taxpayer_saved = saved.get("taxpayer")
     if isinstance(taxpayer_saved, dict):
-        for key in state["taxpayer"].keys():
+        for key in state["taxpayer"]:
             state["taxpayer"][key] = _coerce_text(taxpayer_saved.get(key))
     household_saved = saved.get("household")
     if isinstance(household_saved, dict):
@@ -499,14 +540,14 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
         state["tax_year"] = _coerce_text(saved.get("tax_year"))
     t183_saved = saved.get("t183")
     if isinstance(t183_saved, dict):
-        for key in state["t183"].keys():
+        for key in state["t183"]:
             state["t183"][key] = _coerce_text(t183_saved.get(key))
     outputs_saved = saved.get("outputs")
     if isinstance(outputs_saved, dict) and "out_path" in outputs_saved:
         state["outputs"]["out_path"] = _coerce_text(outputs_saved.get("out_path"))
     efile_saved = saved.get("efile")
     if isinstance(efile_saved, dict):
-        for key in state["efile"].keys():
+        for key in state["efile"]:
             state["efile"][key] = _coerce_text(efile_saved.get(key))
     return state
 
@@ -628,7 +669,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
     state = _default_return_form_state()
     taxpayer_state = state["taxpayer"]
     household_state = state["household"]
-    for field in list(taxpayer_state.keys()):
+    for field in list(taxpayer_state):
         if field == "province":
             taxpayer_state[field] = _form_text(form.get(f"taxpayer_{field}")) or taxpayer_state[field]
         else:
@@ -657,7 +698,7 @@ def _parse_return_form(form: dict[str, Any]) -> tuple[ReturnInput | None, dict[s
     efile_state["transmitter_id"] = _form_text(form.get("transmitter_id"))
 
     slip_indices: set[int] = set()
-    for key in form.keys():
+    for key in form:
         if not key.startswith("slips_t4-"):
             continue
         _, maybe_index, *_ = key.split("-", 2)
@@ -949,13 +990,15 @@ async def create_profile(
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
     slug = slugify(name)
-    data, _, load_errors = load_profile(slug, user_id=user.id)
+    profile_path = request.app.url_path_for("ui_edit_profile", slug=slug)
+    data, _, load_errors = await load_profile_async(slug, user_id=user.id)
     if load_errors:
         raise HTTPException(status_code=400, detail="Unable to load existing profile state.")
     if data:
-        return RedirectResponse(url=f"/ui/profiles/{slug}", status_code=303)
-    save_profile_data(slug, {}, user_id=user.id)
-    return RedirectResponse(url=f"/ui/profiles/{slug}?created=1", status_code=303)
+        return RedirectResponse(url=str(profile_path), status_code=303)
+    _, created = await create_profile_if_missing_async(slug, user_id=user.id)
+    suffix = "?created=1" if created else ""
+    return RedirectResponse(url=f"{profile_path}{suffix}", status_code=303)
 
 
 @router.post("/profiles/{slug}/set-active", response_class=RedirectResponse)
@@ -1125,7 +1168,7 @@ async def submit_t183_consent(
     user: UserRow = Depends(require_user_web),
 ) -> Response:
     form = await request.form()
-    form_data = {key: _form_text(form.get(key)) for key in form.keys()}
+    form_data = {key: _form_text(form.get(key)) for key in form}
     signature = form_data.get("signature", "").strip()
     confirm = form_data.get("confirm", "")
     if not signature:
@@ -1225,7 +1268,11 @@ def download_t183_record(
     raise HTTPException(status_code=404, detail="Record not found")
 
 
-@router.get("/profiles/{slug}", response_class=HTMLResponse)
+@router.get(
+    "/profiles/{slug}",
+    response_class=HTMLResponse,
+    name="ui_edit_profile",
+)
 def edit_profile(
     request: Request,
     slug: str,
@@ -1259,7 +1306,7 @@ async def save_profile(
 ):
     normalized = slugify(slug)
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     data, field_errors = _extract_form_data(form_dict)
     if field_errors:
         context: dict[str, Any] = _profile_context(normalized, data, field_errors, user_id=user.id)
@@ -1276,7 +1323,7 @@ async def preview_profile(
     user: UserRow = Depends(require_user_web),
 ) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     data, errors = _extract_form_data(form_dict)
     preview, preview_errors = _build_preview(data)
     context: dict[str, Any] = {
@@ -1360,7 +1407,7 @@ async def prepare_return(
     user: UserRow = Depends(require_user_web),
 ) -> HTMLResponse:
     form = await request.form()
-    form_dict = {key: form.get(key) for key in form.keys()}
+    form_dict = {key: form.get(key) for key in form}
     payload, field_errors, state = _parse_return_form(form_dict)
 
     current_step = _normalize_step(_form_text(form.get("current_step")))

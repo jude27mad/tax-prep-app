@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from pydantic import ConfigDict, field_validator, model_validator
 
 ENV_BOOL_TRUE = {"1", "true", "yes", "on"}
+INSECURE_SESSION_SECRET = "dev-only-change-me-do-not-use-in-prod"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -66,15 +67,11 @@ class Settings(BaseModel):
     database_url: str | None = Field(default_factory=lambda: os.getenv("DATABASE_URL"))
     db_path: str = Field(default_factory=lambda: os.getenv("DB_PATH", "tax_app.db"))
 
-    # D1.4 — magic-link auth. session_secret is MANDATORY in prod; the
-    # dev default is documented and refuses to sign anything in CERT/PROD
-    # unless overridden. auth_email_backend picks the transport (console
-    # only for Phase 1; smtp/provider adapters land later).
+    # D1.4 — magic-link auth. Every runtime must provide one deployment-wide
+    # key through AUTH_SESSION_SECRET. This keeps cookies valid across workers
+    # and restarts without writing signing material to the filesystem.
     session_secret: str = Field(
-        default_factory=lambda: os.getenv(
-            "AUTH_SESSION_SECRET",
-            "dev-only-change-me-do-not-use-in-prod",
-        )
+        default_factory=lambda: os.getenv("AUTH_SESSION_SECRET", "")
     )
     # Marks the session cookie ``Secure`` (HTTPS-only) and turns on HSTS.
     # Defaults on in PROD (EFILE_ENV=PROD) so prod boots refuse to ship the
@@ -201,6 +198,13 @@ class Settings(BaseModel):
         if value <= 0:
             raise ValueError("Rate-limit settings must be positive integers")
         return value
+
+    @model_validator(mode="after")
+    def _require_secure_session_secret(self) -> "Settings":
+        secret = self.session_secret.strip()
+        if not secret or secret == INSECURE_SESSION_SECRET:
+            raise ValueError("AUTH_SESSION_SECRET must be set to a secure value.")
+        return self
 
     @model_validator(mode="after")
     def _require_endpoints(self) -> "Settings":

@@ -16,6 +16,28 @@ def test_unknown_rc4018_code():
     assert "Unknown" in msg
 
 
+def test_reject_code_info_friendly_message():
+    info = RejectCodeInfo(
+        code="999",
+        category="Test Category",
+        summary="A test summary message.",
+        remediation="A test remediation step.",
+    )
+    assert info.friendly_message == "A test summary message."
+    assert info.friendly_message == info.summary
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["10021", "30001", "80308", "12345", "99999", "", None],
+)
+def test_friendly_message_matches_explain_error_and_summary(code):
+    details = get_reject_details(code)
+    assert details.friendly_message == details.summary
+    if code is not None:
+        assert details.friendly_message == explain_error(code)
+
+
 @pytest.mark.parametrize(
     "code,expected_category,summary_phrase,remediation_phrase",
     [
