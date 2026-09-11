@@ -10,7 +10,12 @@ import zlib
 import pytest
 
 from app.config import get_settings
-from app.printout.t1_render import render_t1_pdf, _sanitize_segment, _sum_decimals
+from app.printout.t1_render import (
+    _format_currency,
+    _sanitize_segment,
+    _sum_decimals,
+    render_t1_pdf,
+)
 from app.core.models import (
     ReturnCalc,
     ReturnInput,
@@ -285,3 +290,32 @@ def test_sum_decimals(values, expected):
 def test_sum_decimals_generator_input():
     values = (value for value in [Decimal("10.00"), None, Decimal("20.00")])
     assert _sum_decimals(values) == Decimal("30.00")
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (None, ""),
+        (0, "$0.00"),
+        (0.0, "$0.00"),
+        (Decimal("0"), "$0.00"),
+        (Decimal("0.00"), "$0.00"),
+        (100, "$100.00"),
+        (-100, "$-100.00"),
+        (1234.5, "$1,234.50"),
+        (-1234.5, "$-1,234.50"),
+        (Decimal("1234567.89"), "$1,234,567.89"),
+        (Decimal("-1234567.89"), "$-1,234,567.89"),
+        (1000000000, "$1,000,000,000.00"),
+        (Decimal("10.555"), "$10.56"),
+        (Decimal("10.554"), "$10.55"),
+        (Decimal("0.001"), "$0.00"),
+        (Decimal("0.009"), "$0.01"),
+        (Decimal("-0.009"), "$-0.01"),
+    ],
+)
+def test_format_currency_edge_cases(
+    value: Decimal | float | int | None,
+    expected: str,
+) -> None:
+    assert _format_currency(value) == expected
