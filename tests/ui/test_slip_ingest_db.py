@@ -304,3 +304,37 @@ async def test_apply_and_clear_respect_bucket_scope(
     s2 = await store.job_status("jane", 2024, other_year.job_id)
     assert s1.status == "complete"
     assert s2.status == "complete"
+
+
+@pytest.mark.asyncio
+async def test_apply_chunked_in_queries(
+    store: SlipStagingStore, engine: AsyncEngine
+) -> None:
+    import uuid
+    factory = create_session_factory(engine)
+    row_ids: list[str] = []
+    async with session_scope(factory) as session:
+        for i in range(600):
+            rid = str(uuid.uuid4())
+            row_ids.append(rid)
+            session.add(
+                DocumentRow(
+                    id=rid,
+                    profile_slug="jane",
+                    tax_year=2025,
+                    source_type="upload",
+                    slip_type="t4",
+                    status=DocumentStatus.COMPLETE.value,
+                    original_filename=f"doc_{i}.txt",
+                    raw_fields={},
+                    warnings=[],
+                )
+            )
+
+    applied = await store.apply("jane", 2025, row_ids)
+    assert len(applied) == 600
+
+    async with session_scope(factory) as session:
+        stmt = select(DocumentRow).where(DocumentRow.profile_slug == "jane")
+        rows = list((await session.execute(stmt)).scalars().all())
+    assert all(r.status == DocumentStatus.APPLIED.value for r in rows)

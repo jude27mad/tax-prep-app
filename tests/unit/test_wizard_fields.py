@@ -24,11 +24,13 @@ def test_parse_number_suffixes() -> None:
     assert parse_number("2b") == 2000000000.0
 
 
-def test_parse_number_invalid() -> None:
-    for invalid_str in ("", "   ", "$", "-", ".", "_"):
-        with pytest.raises(ValueError, match="Please enter a number."):
-            parse_number(invalid_str)
+@pytest.mark.parametrize("invalid", ["", "   ", "$", "-", ".", "_"])
+def test_parse_number_invalid(invalid: str) -> None:
+    with pytest.raises(ValueError, match="Please enter a number."):
+        parse_number(invalid)
 
+
+def test_parse_number_invalid_text() -> None:
     with pytest.raises(ValueError, match="Could not understand number"):
         parse_number("invalid_number_abc")
 

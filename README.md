@@ -214,6 +214,7 @@ Key environment variables (defaults shown):
 | `SOFTWARE_VERSION`                                        | Application version string                    | `0.0.3`                                             |
 | `T183_CRYPTO_KEY`                                         | Fernet key for encrypted T183/T2183 retention | unset                                               |
 | `RETENTION_T2183_ENABLED`                                 | Toggle T2183 retention                        | `false`                                             |
+| `AUTH_SESSION_SECRET`                                     | Shared signing key for session cookies        | required                                            |
 | `AUTH_EMAIL_BACKEND`                                      | Magic-link transport (`console` or `smtp`)    | `console`                                           |
 | `AUTH_SMTP_HOST` / `AUTH_SMTP_FROM`                       | SMTP server + envelope sender (req. for smtp) | unset                                               |
 | `AUTH_SMTP_PORT` / `AUTH_SMTP_USERNAME` / `AUTH_SMTP_PASSWORD` | SMTP submission config                    | `587` / unset / unset                               |
@@ -229,7 +230,12 @@ set FEATURE_LEGACY_EFILE=true
 set EFILE_SOFTWARE_ID_CERT=YOUR_SOFTWARE_ID
 set EFILE_TRANSMITTER_ID_CERT=YOUR_TRANSMITTER_ID
 set EFILE_ENDPOINT_CERT=https://cra-cert-endpoint
+set AUTH_SESSION_SECRET=GENERATE_A_RANDOM_32_BYTE_TOKEN
 ```
+
+Generate a new session key for each deployment and provide the same value to
+every application worker. Do not commit the key or write it to application
+logs.
 
 ### Multipart form parsing
 
