@@ -412,10 +412,10 @@ def _extract_text(extension: str, data: bytes) -> str:
 
 
 def _extract_text_from_pdf(data: bytes) -> str:
-    tmp_file = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    tmp_path = Path(tmp_file.name)
+    tmp_path: Path | None = None
     try:
-        with tmp_file:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
+            tmp_path = Path(tmp_file.name)
             tmp_file.write(data)
         reader = PdfReader(tmp_path)
         pages: list[str] = []
@@ -436,7 +436,8 @@ def _extract_text_from_pdf(data: bytes) -> str:
     except Exception as exc:
         raise SlipUploadError("Unable to read PDF upload") from exc
     finally:
-        tmp_path.unlink(missing_ok=True)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 def _extract_text_from_image(data: bytes) -> str:
