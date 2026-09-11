@@ -115,7 +115,7 @@ class AuthRequestRateLimiter:
         # The IP-only check goes first so a flood of bad emails from one
         # source still trips the per-IP cap even if each email is unique
         # and would otherwise sail past the per-email check.
-        ip_result = await self.per_ip.check(normalized_email if not ip else ip)
+        ip_result = await self.per_ip.check(ip or normalized_email)
         email_result = await self.per_email.check(normalized_email)
 
         if ip_result.allowed and email_result.allowed:
