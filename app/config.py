@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import BaseModel, Field
@@ -23,6 +25,52 @@ def _env_env() -> Literal["CERT", "PROD"]:
     upper = os.getenv("EFILE_ENV", "CERT").upper()
     normalized = upper if upper in {"CERT", "PROD"} else "CERT"
     return cast(Literal["CERT", "PROD"], normalized)
+
+
+def _get_dev_session_secret() -> str:
+    env_secret = os.getenv("AUTH_SESSION_SECRET")
+    if env_secret and env_secret.strip():
+        return env_secret.strip()
+
+    secret_file = Path(".dev_session_secret")
+    if secret_file.exists():
+        try:
+            content = secret_file.read_text(encoding="utf-8").strip()
+            if content:
+                return content
+        except Exception:
+            pass
+
+    lock_dir = Path(".dev_session_secret.lock")
+    try:
+        lock_dir.mkdir(parents=False, exist_ok=False)
+        try:
+            if secret_file.exists():
+                content = secret_file.read_text(encoding="utf-8").strip()
+                if content:
+                    return content
+            new_secret = secrets.token_urlsafe(32)
+            tmp_file = Path(f".dev_session_secret.tmp.{os.getpid()}")
+            tmp_file.write_text(new_secret, encoding="utf-8")
+            tmp_file.replace(secret_file)
+            return new_secret
+        finally:
+            try:
+                lock_dir.rmdir()
+            except Exception:
+                pass
+    except FileExistsError:
+        for _ in range(40):
+            time.sleep(0.05)
+            if secret_file.exists():
+                try:
+                    content = secret_file.read_text(encoding="utf-8").strip()
+                    if content:
+                        return content
+                except Exception:
+                    pass
+
+    return secrets.token_urlsafe(32)
 
 
 @dataclass(frozen=True)
@@ -71,7 +119,7 @@ class Settings(BaseModel):
     # if not explicitly set, a random secret key is generated at startup.
     # auth_email_backend picks the transport (console only for Phase 1; smtp/provider adapters land later).
     session_secret: str = Field(
-        default_factory=lambda: os.getenv("AUTH_SESSION_SECRET") or secrets.token_urlsafe(32)
+        default_factory=_get_dev_session_secret
     )
     # Marks the session cookie ``Secure`` (HTTPS-only) and turns on HSTS.
     # Defaults on in PROD (EFILE_ENV=PROD) so prod boots refuse to ship the
