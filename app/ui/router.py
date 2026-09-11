@@ -517,7 +517,7 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
     state = base
     taxpayer_saved = saved.get("taxpayer")
     if isinstance(taxpayer_saved, dict):
-        for key in state["taxpayer"].keys():
+        for key in state["taxpayer"]:
             state["taxpayer"][key] = _coerce_text(taxpayer_saved.get(key))
     household_saved = saved.get("household")
     if isinstance(household_saved, dict):
@@ -540,14 +540,14 @@ def _merge_return_form_state(base: dict[str, Any], saved: dict[str, Any]) -> dic
         state["tax_year"] = _coerce_text(saved.get("tax_year"))
     t183_saved = saved.get("t183")
     if isinstance(t183_saved, dict):
-        for key in state["t183"].keys():
+        for key in state["t183"]:
             state["t183"][key] = _coerce_text(t183_saved.get(key))
     outputs_saved = saved.get("outputs")
     if isinstance(outputs_saved, dict) and "out_path" in outputs_saved:
         state["outputs"]["out_path"] = _coerce_text(outputs_saved.get("out_path"))
     efile_saved = saved.get("efile")
     if isinstance(efile_saved, dict):
-        for key in state["efile"].keys():
+        for key in state["efile"]:
             state["efile"][key] = _coerce_text(efile_saved.get(key))
     return state
 
