@@ -76,7 +76,7 @@ DEFAULT_HSTS_MAX_AGE: Final = 63072000  # two years, in seconds
 
 
 def generate_csrf_token() -> str:
-    return secrets.token_urlsafe(_TOKEN_BYTES)
+    return secrets.token_hex(32)
 
 
 def get_csrf_token(request: Request) -> str:
