@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict, field_validator, model_validator
 
 ENV_BOOL_TRUE = {"1", "true", "yes", "on"}
+INSECURE_SESSION_SECRET = "dev-only-change-me-do-not-use-in-prod"
+DEFAULT_SESSION_SECRET_FILE = ".auth_session_secret"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -23,6 +27,63 @@ def _env_env() -> Literal["CERT", "PROD"]:
     upper = os.getenv("EFILE_ENV", "CERT").upper()
     normalized = upper if upper in {"CERT", "PROD"} else "CERT"
     return cast(Literal["CERT", "PROD"], normalized)
+
+
+def _read_session_secret(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return value or None
+
+
+def _load_or_create_session_secret() -> str:
+    configured = os.getenv("AUTH_SESSION_SECRET")
+    if configured is not None:
+        return configured
+
+    path = Path(os.getenv("AUTH_SESSION_SECRET_FILE", DEFAULT_SESSION_SECRET_FILE))
+    existing = _read_session_secret(path)
+    if existing is not None:
+        return existing
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(f".{path.name}.lock")
+    try:
+        lock_path.mkdir(mode=0o700)
+    except FileExistsError:
+        # Another worker is creating the file. The final os.replace below is
+        # atomic, so readers observe either no file or the complete secret.
+        for _ in range(100):
+            existing = _read_session_secret(path)
+            if existing is not None:
+                return existing
+            time.sleep(0.01)
+        raise RuntimeError(f"Timed out waiting for session secret file: {path}")
+
+    # A creator may have finished between our first read and lock acquisition.
+    existing = _read_session_secret(path)
+    if existing is not None:
+        lock_path.rmdir()
+        return existing
+
+    generated = secrets.token_urlsafe(32)
+    temporary_path = lock_path / "value"
+    try:
+        descriptor = os.open(
+            temporary_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"{generated}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+        lock_path.rmdir()
+    return generated
 
 
 @dataclass(frozen=True)
@@ -67,12 +128,11 @@ class Settings(BaseModel):
     database_url: str | None = Field(default_factory=lambda: os.getenv("DATABASE_URL"))
     db_path: str = Field(default_factory=lambda: os.getenv("DB_PATH", "tax_app.db"))
 
-    # D1.4 — magic-link auth. session_secret is MANDATORY in prod; in dev/CERT
-    # if not explicitly set, a random secret key is generated at startup.
-    # auth_email_backend picks the transport (console only for Phase 1; smtp/provider adapters land later).
-    session_secret: str = Field(
-        default_factory=lambda: os.getenv("AUTH_SESSION_SECRET") or secrets.token_urlsafe(32)
-    )
+    # D1.4 — magic-link auth. session_secret is mandatory in PROD. In CERT,
+    # the generated fallback is persisted so all workers and later restarts
+    # continue to accept cookies signed by the same key. Deployments can set
+    # AUTH_SESSION_SECRET_FILE to choose the shared persistent location.
+    session_secret: str = Field(default_factory=_load_or_create_session_secret)
     # Marks the session cookie ``Secure`` (HTTPS-only) and turns on HSTS.
     # Defaults on in PROD (EFILE_ENV=PROD) so prod boots refuse to ship the
     # cookie over plaintext; dev/CERT stays off so http://localhost works.
@@ -199,11 +259,22 @@ class Settings(BaseModel):
             raise ValueError("Rate-limit settings must be positive integers")
         return value
 
+    @field_validator("session_secret")
+    @classmethod
+    def _validate_session_secret(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("session_secret must not be blank")
+        return value
+
     @model_validator(mode="after")
     def _require_session_secret_in_prod(self) -> "Settings":
         if self.efile_environment == "PROD":
-            secret = os.getenv("AUTH_SESSION_SECRET")
-            if not secret or not secret.strip() or secret == "dev-only-change-me-do-not-use-in-prod":
+            secret = self.session_secret.strip()
+            explicitly_configured = (
+                "session_secret" in self.model_fields_set
+                or os.getenv("AUTH_SESSION_SECRET") is not None
+            )
+            if not explicitly_configured or secret == INSECURE_SESSION_SECRET:
                 raise ValueError("AUTH_SESSION_SECRET must be explicitly set in PROD environment.")
         return self
 

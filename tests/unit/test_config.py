@@ -24,9 +24,10 @@ def test_feature_flag_parsing(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_session_secret_prod_missing_raises(monkeypatch):
+def test_session_secret_prod_missing_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("EFILE_ENV", "prod")
     monkeypatch.delenv("AUTH_SESSION_SECRET", raising=False)
+    monkeypatch.setenv("AUTH_SESSION_SECRET_FILE", str(tmp_path / "session-secret"))
     get_settings.cache_clear()
     with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be explicitly set in PROD"):
         Settings()
@@ -51,16 +52,32 @@ def test_session_secret_prod_valid_succeeds(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_session_secret_cert_default_random(monkeypatch):
+def test_session_secret_prod_valid_constructor_value_succeeds(monkeypatch):
+    monkeypatch.setenv("EFILE_ENV", "prod")
+    monkeypatch.delenv("AUTH_SESSION_SECRET", raising=False)
+    settings = Settings(session_secret="constructor-provided-secure-secret")
+    assert settings.session_secret == "constructor-provided-secure-secret"
+
+
+def test_session_secret_prod_valid_env_does_not_mask_insecure_constructor(monkeypatch):
+    monkeypatch.setenv("EFILE_ENV", "prod")
+    monkeypatch.setenv("AUTH_SESSION_SECRET", "secure-environment-secret")
+    with pytest.raises(ValueError, match="AUTH_SESSION_SECRET must be explicitly set in PROD"):
+        Settings(session_secret="dev-only-change-me-do-not-use-in-prod")
+
+
+def test_session_secret_cert_default_is_persisted(monkeypatch, tmp_path):
     monkeypatch.setenv("EFILE_ENV", "cert")
     monkeypatch.delenv("AUTH_SESSION_SECRET", raising=False)
+    secret_path = tmp_path / "session-secret"
+    monkeypatch.setenv("AUTH_SESSION_SECRET_FILE", str(secret_path))
     get_settings.cache_clear()
     settings1 = Settings()
     get_settings.cache_clear()
     settings2 = Settings()
     assert settings1.session_secret
-    assert settings2.session_secret
-    # Random tokens generated dynamically without hardcoded fallback
+    assert settings2.session_secret == settings1.session_secret
+    assert secret_path.read_text(encoding="utf-8").strip() == settings1.session_secret
     assert len(settings1.session_secret) >= 16
     get_settings.cache_clear()
 
