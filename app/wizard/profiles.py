@@ -15,6 +15,7 @@ guess the slug.
 from __future__ import annotations
 
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,8 @@ try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+
+import anyio
 
 from app.paths import resolve_within
 
@@ -85,6 +88,45 @@ def _trash_dir(user_id: str | None = None) -> Path:
 
 def _active_pointer(user_id: str | None = None) -> Path:
     return _user_root(user_id) / "active_profile.txt"
+
+
+async def load_profile_async(
+    slug: str | None,
+    *,
+    user_id: str | None = None,
+) -> tuple[dict[str, Any], Path | None, list[str]]:
+    return await anyio.to_thread.run_sync(
+        partial(load_profile, slug, user_id=user_id)
+    )
+
+
+def _create_profile_if_missing(
+    slug: str,
+    *,
+    user_id: str | None = None,
+) -> tuple[Path, bool]:
+    """Create an empty profile without overwriting a concurrent writer."""
+    _ensure_profiles_dirs(user_id)
+    path = _profile_path(slug, user_id)
+    try:
+        # An empty file is valid TOML. Create-and-close it atomically so this
+        # creator never writes through a stale handle after another request
+        # has begun saving the new profile.
+        path.touch(exist_ok=False)
+    except FileExistsError:
+        return path, False
+    set_active_profile(slug, user_id=user_id)
+    return path, True
+
+
+async def create_profile_if_missing_async(
+    slug: str,
+    *,
+    user_id: str | None = None,
+) -> tuple[Path, bool]:
+    return await anyio.to_thread.run_sync(
+        partial(_create_profile_if_missing, slug, user_id=user_id)
+    )
 
 
 def load_profile(
@@ -278,11 +320,13 @@ __all__ = [
     "CLI_NUMERIC_FIELDS",
     "CLI_SAVE_ORDER",
     "CLI_SUBMIT_FIELDS",
+    "create_profile_if_missing_async",
     "delete_profile",
     "get_active_profile",
     "list_profiles",
     "list_trash",
     "load_profile",
+    "load_profile_async",
     "rename_profile",
     "restore_profile",
     "save_profile_data",

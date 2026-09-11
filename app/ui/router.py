@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import SplitResult, urlsplit
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -41,12 +42,14 @@ from app.wizard import (
     CLI_SUBMIT_FIELDS,
     T4EstimateRequest,
     coerce_for_field,
+    create_profile_if_missing_async,
     delete_profile,
     estimate_from_t4,
     get_active_profile,
     list_profiles,
     list_trash,
     load_profile,
+    load_profile_async,
     rename_profile,
     restore_profile,
     save_profile_data,
@@ -133,13 +136,44 @@ AUTOSAVE_INTERVAL_MS = 20000
 T183_RETENTION_DIRNAME = "t183"
 
 
+def _origin(url: SplitResult) -> tuple[str, str, int | None] | None:
+    """Return a normalized URL origin, or ``None`` for malformed URLs."""
+    try:
+        scheme = url.scheme.casefold()
+        hostname = url.hostname.casefold() if url.hostname else ""
+        port = url.port
+    except ValueError:
+        return None
+    if not scheme or not hostname:
+        return None
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, hostname, port
+
+
+def _sanitize_redirect(target: str | None, request: Request) -> str:
+    if not target:
+        return "/ui/"
+    try:
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc:
+            if _origin(parsed) != _origin(urlsplit(str(request.url))):
+                return "/ui/"
+        path = parsed.path or "/"
+    except ValueError:
+        return "/ui/"
+    if not path.startswith("/") or path.startswith("//") or path.startswith("/\\"):
+        return "/ui/"
+    return path + (f"?{parsed.query}" if parsed.query else "")
+
+
 @router.post("/locale/{code}", name="ui_set_locale")
 async def set_locale(code: str, request: Request) -> RedirectResponse:
     """Persist the user's locale choice in the ``locale`` cookie and
     redirect back to the referring page (or ``/ui/`` if no referer)."""
     if not is_supported(code):
         raise HTTPException(status_code=400, detail=f"Unsupported locale: {code!r}")
-    target = request.headers.get("referer") or "/ui/"
+    target = _sanitize_redirect(request.headers.get("referer"), request)
     response = RedirectResponse(url=target, status_code=303)
     response.set_cookie(
         key=LOCALE_COOKIE_NAME,
@@ -956,13 +990,15 @@ async def create_profile(
     if not name:
         raise HTTPException(status_code=400, detail="Profile name is required")
     slug = slugify(name)
-    data, _, load_errors = load_profile(slug, user_id=user.id)
+    profile_path = request.app.url_path_for("ui_edit_profile", slug=slug)
+    data, _, load_errors = await load_profile_async(slug, user_id=user.id)
     if load_errors:
         raise HTTPException(status_code=400, detail="Unable to load existing profile state.")
     if data:
-        return RedirectResponse(url=f"/ui/profiles/{slug}", status_code=303)
-    save_profile_data(slug, {}, user_id=user.id)
-    return RedirectResponse(url=f"/ui/profiles/{slug}?created=1", status_code=303)
+        return RedirectResponse(url=str(profile_path), status_code=303)
+    _, created = await create_profile_if_missing_async(slug, user_id=user.id)
+    suffix = "?created=1" if created else ""
+    return RedirectResponse(url=f"{profile_path}{suffix}", status_code=303)
 
 
 @router.post("/profiles/{slug}/set-active", response_class=RedirectResponse)
@@ -1232,7 +1268,11 @@ def download_t183_record(
     raise HTTPException(status_code=404, detail="Record not found")
 
 
-@router.get("/profiles/{slug}", response_class=HTMLResponse)
+@router.get(
+    "/profiles/{slug}",
+    response_class=HTMLResponse,
+    name="ui_edit_profile",
+)
 def edit_profile(
     request: Request,
     slug: str,
