@@ -495,10 +495,8 @@ def _perform_pdf_ocr(images: Iterable[Any]) -> list[str]:
         finally:
             closer = getattr(image, "close", None)
             if callable(closer):
-                try:
+                with suppress(Exception):
                     closer()
-                except Exception:
-                    pass
     return texts
 
 
