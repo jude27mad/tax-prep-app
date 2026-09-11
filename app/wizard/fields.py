@@ -27,9 +27,31 @@ CLI_SAVE_ORDER = [
 
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "full_name": ("full name", "name", "legal name", "taxpayer name"),
-    "province": ("province", "province code", "province of residence", "prov", "residence province"),
-    "box14": ("box14", "box 14", "employment income", "wages", "salary", "income", "t4 box 14"),
-    "box22": ("box22", "box 22", "tax deducted", "tax withheld", "withholding", "income tax deducted", "t4 box 22"),
+    "province": (
+        "province",
+        "province code",
+        "province of residence",
+        "prov",
+        "residence province",
+    ),
+    "box14": (
+        "box14",
+        "box 14",
+        "employment income",
+        "wages",
+        "salary",
+        "income",
+        "t4 box 14",
+    ),
+    "box22": (
+        "box22",
+        "box 22",
+        "tax deducted",
+        "tax withheld",
+        "withholding",
+        "income tax deducted",
+        "t4 box 22",
+    ),
     "box16": ("box16", "box 16", "cpp contributions", "cpp", "t4 box 16"),
     "box16a": (
         "box16a",
@@ -54,12 +76,13 @@ NUM_SUFFIXES = {
 }
 
 _KEY_VALUE_RE = re.compile(r"^\s*([^#:=]+?)\s*(?:[:=]|->)\s*(.+)$")
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]")
 _ALIAS_LOOKUP: dict[str, str] = {}
 _ALIAS_MATCHERS: list[tuple[str, str]] = []
 
 
 def _normalize_key(raw: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", raw.lower())
+    return _NORMALIZE_RE.sub("", raw.lower())
 
 
 def canonical_key(raw: str) -> str | None:
@@ -70,7 +93,7 @@ def canonical_key(raw: str) -> str | None:
 for canonical, aliases in _FIELD_ALIASES.items():
     all_aliases = (canonical, *aliases)
     for alias in all_aliases:
-        normalized = re.sub(r"[^a-z0-9]", "", alias.lower())
+        normalized = _NORMALIZE_RE.sub("", alias.lower())
         if normalized and normalized not in _ALIAS_LOOKUP:
             _ALIAS_LOOKUP[normalized] = canonical
         cleaned = " ".join(alias.lower().split())
@@ -78,7 +101,11 @@ for canonical, aliases in _FIELD_ALIASES.items():
             _ALIAS_MATCHERS.append((cleaned, canonical))
 
 # Deduplicate while keeping longest aliases first so "box 16a" matches before "box 16"
-_ALIAS_MATCHERS = sorted({alias: canonical for alias, canonical in _ALIAS_MATCHERS}.items(), key=lambda item: len(item[0]), reverse=True)
+_ALIAS_MATCHERS = sorted(
+    {alias: canonical for alias, canonical in _ALIAS_MATCHERS}.items(),
+    key=lambda item: len(item[0]),
+    reverse=True,
+)
 
 
 def parse_number(text: str) -> float:
@@ -90,7 +117,9 @@ def parse_number(text: str) -> float:
     if suffix in NUM_SUFFIXES:
         multiplier = NUM_SUFFIXES[suffix]
         cleaned = cleaned[:-1]
-    cleaned = cleaned.replace("$", "").replace(",", "").replace(" ", "").replace("_", "")
+    cleaned = (
+        cleaned.replace("$", "").replace(",", "").replace(" ", "").replace("_", "")
+    )
     cleaned = cleaned.replace("−", "-").replace("–", "-")
     if cleaned in {"", "-", "."}:
         raise ValueError("Please enter a number.")
@@ -133,7 +162,9 @@ def coerce_for_field(field: str, value: Any) -> Any:
     return str(value).strip()
 
 
-def canonicalize_with_metadata(raw: Any) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
+def canonicalize_with_metadata(
+    raw: Any,
+) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
     if not isinstance(raw, dict):
         return {}, [], []
     flattened = dict(raw)
@@ -163,7 +194,9 @@ def canonicalize_data(raw: Any) -> dict[str, Any]:
     return data
 
 
-def parse_freeform_text(text: str) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
+def parse_freeform_text(
+    text: str,
+) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
     result: dict[str, Any] = {}
     mapping: list[tuple[str, str]] = []
     unknown: list[str] = []
@@ -197,7 +230,9 @@ def parse_freeform_text(text: str) -> tuple[dict[str, Any], list[tuple[str, str]
     return result, mapping, unknown
 
 
-def _load_from_csv(reader: csv.DictReader[str]) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
+def _load_from_csv(
+    reader: csv.DictReader[str],
+) -> tuple[dict[str, Any], list[tuple[str, str]], list[str]]:
     try:
         row = next(reader)
     except StopIteration:
@@ -220,7 +255,9 @@ def load_data_file(path) -> tuple[dict[str, Any], dict[str, Any]]:
     if suffix == ".toml":
         try:
             import tomllib  # Python 3.11+
-        except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
+        except (
+            ModuleNotFoundError
+        ):  # pragma: no cover - fallback for older interpreters
             import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
         with path.open("rb") as handle:
