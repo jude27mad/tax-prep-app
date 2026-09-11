@@ -10,7 +10,7 @@ import zlib
 import pytest
 
 from app.config import get_settings
-from app.printout.t1_render import render_t1_pdf, _sum_decimals
+from app.printout.t1_render import render_t1_pdf, _sanitize_segment, _sum_decimals
 from app.core.models import (
     ReturnCalc,
     ReturnInput,
@@ -240,6 +240,29 @@ def test_render_t1_pdf_respects_explicit_filename(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "input_val, expected",
+    [
+        ("Lovelace", "lovelace"),
+        ("SMITH", "smith"),
+        ("  Jane  ", "jane"),
+        ("John Smith", "john-smith"),
+        ("O'Connor", "o-connor"),
+        ("St. John-Smythe!", "st-john-smythe"),
+        ("Foo--Bar__Baz$$Qux", "foo-bar-baz-qux"),
+        ("Player123", "player123"),
+        ("999", "999"),
+        ("", "taxpayer"),
+        ("   ", "taxpayer"),
+        ("!@#$%^&*()", "taxpayer"),
+        ("---", "taxpayer"),
+        (" - - - ", "taxpayer"),
+    ],
+)
+def test_sanitize_segment(input_val: str, expected: str):
+    assert _sanitize_segment(input_val) == expected
+
+
+@pytest.mark.parametrize(
     "values, expected",
     [
         ([], Decimal("0.00")),
@@ -260,5 +283,5 @@ def test_sum_decimals(values, expected):
 
 
 def test_sum_decimals_generator_input():
-    gen = (val for val in [Decimal("10.00"), None, Decimal("20.00")])
-    assert _sum_decimals(gen) == Decimal("30.00")
+    values = (value for value in [Decimal("10.00"), None, Decimal("20.00")])
+    assert _sum_decimals(values) == Decimal("30.00")

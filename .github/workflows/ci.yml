@@ -20,6 +20,10 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Generate ephemeral CI session secret
+        run: |
+          python -c "import os, secrets; open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write(f'AUTH_SESSION_SECRET={secrets.token_urlsafe(32)}\\n')"
+
       - run: pip install -r requirements-ci.txt
 
       - run: ruff check .
@@ -53,6 +57,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
+
+      - name: Generate ephemeral CI session secret
+        run: |
+          python -c "import os, secrets; open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8').write(f'AUTH_SESSION_SECRET={secrets.token_urlsafe(32)}\\n')"
 
       - run: pip install -r requirements-ci.txt
 

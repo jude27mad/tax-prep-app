@@ -90,9 +90,9 @@ _settings_for_session = get_settings()
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(CSRFMiddleware)
 # D1.4: signed-cookie sessions for magic-link auth. The secret comes from
-# settings; in dev this is a well-known default documented in app/config.py,
-# in prod AUTH_SESSION_SECRET must be set. ``https_only``/Secure tracks the
-# environment (PROD by default) so prod never ships the cookie over plaintext.
+# AUTH_SESSION_SECRET and must be shared by every worker. ``https_only``/Secure
+# tracks the environment (PROD by default) so prod never ships the cookie over
+# plaintext.
 app.add_middleware(
     SessionMiddleware,
     secret_key=_settings_for_session.session_secret,
@@ -1265,6 +1265,5 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
 
 

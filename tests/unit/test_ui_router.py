@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import import_module
 import json
+from pathlib import Path
 from typing import cast
 
 from fastapi import FastAPI
@@ -124,6 +125,95 @@ def test_create_profile_accepts_multipart(tmp_path, monkeypatch):
     assert response.headers["location"].endswith("/ui/profiles/test-user?created=1")
     assert "multipart/form-data" in response.request.headers.get("Content-Type", "")
     assert (base / "profiles" / "users" / TEST_USER_ID / "test-user.toml").exists()
+
+
+def test_create_profile_preserves_a_concurrent_write(tmp_path, monkeypatch):
+    base = _configure_profiles_dirs(monkeypatch, tmp_path)
+
+    async def load_while_another_request_creates(slug, *, user_id=None):
+        profiles.save_profile_data(
+            slug,
+            {"full_name": "Concurrent Winner"},
+            user_id=user_id,
+        )
+        return {}, None, []
+
+    monkeypatch.setattr(
+        ui_router_module,
+        "load_profile_async",
+        load_while_another_request_creates,
+    )
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles",
+        data={"name": "Test User"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("/ui/profiles/test-user")
+    profile_path = base / "profiles" / "users" / TEST_USER_ID / "test-user.toml"
+    assert 'full_name = "Concurrent Winner"' in profile_path.read_text(encoding="utf-8")
+
+
+def test_atomic_profile_create_never_writes_after_publishing_file(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+    original_open = Path.open
+    original_touch = Path.touch
+
+    class InterleavingExclusiveHandle:
+        def __init__(self, handle, path):
+            self.handle = handle
+            self.path = path
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def write(self, value):
+            profiles.save_user_data({"full_name": "Concurrent Winner"}, self.path)
+            return self.handle.write(value)
+
+    def open_with_competing_writer(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if mode == "x":
+            return InterleavingExclusiveHandle(handle, path)
+        return handle
+
+    def touch_with_competing_writer(path, *args, **kwargs):
+        result = original_touch(path, *args, **kwargs)
+        profiles.save_user_data({"full_name": "Concurrent Winner"}, path)
+        return result
+
+    monkeypatch.setattr(Path, "open", open_with_competing_writer)
+    monkeypatch.setattr(Path, "touch", touch_with_competing_writer)
+
+    profile_path, created = profiles._create_profile_if_missing(
+        "test-user",
+        user_id=TEST_USER_ID,
+    )
+
+    assert created is True
+    assert profile_path.read_text(encoding="utf-8") == 'full_name = "Concurrent Winner"\n'
+
+
+def test_create_profile_redirect_cannot_become_external(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles",
+        data={"name": r"//evil.example\taxpayer"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/profiles/evil-example-taxpayer?created=1"
 
 
 def test_preview_displays_summary(tmp_path, monkeypatch):

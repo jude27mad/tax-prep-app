@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import sys
 import asyncio
+from contextlib import suppress
 
 if sys.platform.startswith("win"):
-    try:
+    with suppress(Exception):
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    except Exception:
-        # If anything odd happens (older python, pypy, etc), just continue.
-        pass

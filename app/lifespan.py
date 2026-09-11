@@ -118,7 +118,7 @@ async def _invoke_hook(hook: Hook | None, app: FastAPI) -> None:
         result = hook(app)
         if inspect.isawaitable(result):
             await result  # type: ignore[func-returns-value]
-    except Exception:  # pragma: no cover
+    except Exception:
         logging.getLogger("tax_app").exception("Application lifecycle hook failed")
 
 

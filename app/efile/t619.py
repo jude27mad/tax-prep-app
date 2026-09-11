@@ -7,8 +7,9 @@ from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Any, Dict
 import zipfile
-from xml.dom import minidom
-from xml.etree.ElementTree import Element, SubElement, tostring
+from defusedxml import minidom
+from defusedxml.ElementTree import tostring
+from xml.etree.ElementTree import Element, SubElement
 
 import xmlschema
 
