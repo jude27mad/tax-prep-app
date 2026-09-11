@@ -377,6 +377,28 @@ def test_ui_set_locale_persists_cookie(ui_client):
     assert f"{LOCALE_COOKIE_NAME}=fr" in set_cookie
 
 
+def test_ui_set_locale_drops_external_referer(ui_client):
+    resp = ui_client.post(
+        "/ui/locale/fr",
+        headers={"referer": "https://evil.example/phish"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/ui/"
+
+
+def test_ui_set_locale_preserves_same_origin_absolute_referer(ui_client):
+    resp = ui_client.post(
+        "/ui/locale/fr",
+        headers={"referer": "http://testserver/ui/profiles/alice?step=slips#ignored"},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/ui/profiles/alice?step=slips"
+
+
 def test_ui_set_locale_rejects_unsupported(ui_client):
     resp = ui_client.post("/ui/locale/de", follow_redirects=False)
     assert resp.status_code == 400

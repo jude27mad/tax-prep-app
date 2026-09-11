@@ -10,7 +10,12 @@ import zlib
 import pytest
 
 from app.config import get_settings
-from app.printout.t1_render import _format_currency, render_t1_pdf
+from app.printout.t1_render import (
+    _format_currency,
+    _sanitize_segment,
+    _sum_decimals,
+    render_t1_pdf,
+)
 from app.core.models import (
     ReturnCalc,
     ReturnInput,
@@ -240,6 +245,54 @@ def test_render_t1_pdf_respects_explicit_filename(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "input_val, expected",
+    [
+        ("Lovelace", "lovelace"),
+        ("SMITH", "smith"),
+        ("  Jane  ", "jane"),
+        ("John Smith", "john-smith"),
+        ("O'Connor", "o-connor"),
+        ("St. John-Smythe!", "st-john-smythe"),
+        ("Foo--Bar__Baz$$Qux", "foo-bar-baz-qux"),
+        ("Player123", "player123"),
+        ("999", "999"),
+        ("", "taxpayer"),
+        ("   ", "taxpayer"),
+        ("!@#$%^&*()", "taxpayer"),
+        ("---", "taxpayer"),
+        (" - - - ", "taxpayer"),
+    ],
+)
+def test_sanitize_segment(input_val: str, expected: str):
+    assert _sanitize_segment(input_val) == expected
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ([], Decimal("0.00")),
+        ((), Decimal("0.00")),
+        ([None], Decimal("0.00")),
+        ([None, None], Decimal("0.00")),
+        ([Decimal("123.45")], Decimal("123.45")),
+        ([Decimal("100.50"), None, Decimal("200.25")], Decimal("300.75")),
+        ([10, "20.5", Decimal("5.25")], Decimal("35.75")),
+        ([-10, Decimal("15.50")], Decimal("5.50")),
+        ([None, 0, None, Decimal("0.00")], Decimal("0.00")),
+    ],
+)
+def test_sum_decimals(values, expected):
+    result = _sum_decimals(values)
+    assert result == expected
+    assert isinstance(result, Decimal)
+
+
+def test_sum_decimals_generator_input():
+    values = (value for value in [Decimal("10.00"), None, Decimal("20.00")])
+    assert _sum_decimals(values) == Decimal("30.00")
+
+
+@pytest.mark.parametrize(
     "value, expected",
     [
         (None, ""),
@@ -261,5 +314,8 @@ def test_render_t1_pdf_respects_explicit_filename(tmp_path, monkeypatch):
         (Decimal("-0.009"), "$-0.01"),
     ],
 )
-def test_format_currency_edge_cases(value: Decimal | float | int | None, expected: str):
+def test_format_currency_edge_cases(
+    value: Decimal | float | int | None,
+    expected: str,
+) -> None:
     assert _format_currency(value) == expected

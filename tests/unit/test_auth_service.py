@@ -21,6 +21,7 @@ from app.auth.service import (
     TokenExpiredError,
     TokenInvalidError,
     TokenReusedError,
+    _normalize_email,
 )
 from app.db import (
     Base,
@@ -115,6 +116,46 @@ async def test_request_rejects_malformed_email(
     svc, backend = service
     with pytest.raises(ValueError):
         await svc.request_magic_link("not-an-email")
+    assert backend.sent == []
+
+
+# ---------------------------------------------------------------------------
+# _normalize_email
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw_email", "expected_normalized"),
+    [
+        ("USER@EXAMPLE.COM", "user@example.com"),
+        ("  user@example.com  ", "user@example.com"),
+        ("  Alice@Example.COM  ", "alice@example.com"),
+        ("\tuser@example.com\n", "user@example.com"),
+        (" \t\n user@example.com \r\n ", "user@example.com"),
+        ("\u00a0user@example.com\u00a0", "user@example.com"),
+        ("", ""),
+        ("   ", ""),
+        ("\t\n  \r", ""),
+        ("MÜLLER@EXAMPLE.COM", "müller@example.com"),
+        ("TEST@ÉXAMPLE.COM", "test@éxample.com"),
+        ("user+tag@sub.domain.co.uk", "user+tag@sub.domain.co.uk"),
+        ("  not-an-email  ", "not-an-email"),
+        ("a@b@c.com", "a@b@c.com"),
+        ("user name@example.com", "user name@example.com"),
+    ],
+)
+def test_normalize_email_edge_cases(raw_email: str, expected_normalized: str) -> None:
+    assert _normalize_email(raw_email) == expected_normalized
+
+
+@pytest.mark.parametrize("whitespace_email", ["", "   ", " \t \n \r "])
+@pytest.mark.asyncio
+async def test_request_magic_link_whitespace_only_email_raises(
+    service: tuple[AuthService, RecordingEmailBackend], whitespace_email: str
+) -> None:
+    svc, backend = service
+    with pytest.raises(ValueError, match="Invalid email address."):
+        await svc.request_magic_link(whitespace_email)
     assert backend.sent == []
 
 

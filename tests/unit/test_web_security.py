@@ -24,8 +24,10 @@ from app.auth.email import RecordingEmailBackend
 from app.db import Base, create_session_factory
 from app.i18n import LocaleMiddleware
 from app.web_security import (
+    CSRF_SESSION_KEY,
     CSRFMiddleware,
     SecurityHeadersMiddleware,
+    generate_csrf_token,
     get_csrf_token,
 )
 
@@ -68,6 +70,66 @@ def test_hsts_emitted_only_when_enabled() -> None:
     on = _headers_app(enable_hsts=True).get("/probe")
     assert on.headers["strict-transport-security"].startswith("max-age=")
     assert "includeSubDomains" in on.headers["strict-transport-security"]
+
+
+# ---------------------------------------------------------------------------
+# Token Generation
+# ---------------------------------------------------------------------------
+
+def test_generate_csrf_token() -> None:
+    token1 = generate_csrf_token()
+    token2 = generate_csrf_token()
+
+    # Check that tokens are unique
+    assert token1 != token2
+
+    # Check that token length matches expected hex representation of 32 bytes (64 chars)
+    assert len(token1) == 64
+    assert len(token2) == 64
+
+    # Verify it's a valid hex string
+    int(token1, 16)
+    int(token2, 16)
+
+
+def test_generate_csrf_token_batch_is_unique_lowercase_hex() -> None:
+    tokens = {generate_csrf_token() for _ in range(100)}
+
+    assert len(tokens) == 100
+    assert all(re.fullmatch(r"[0-9a-f]{64}", token) for token in tokens)
+
+
+# ---------------------------------------------------------------------------
+# Token lookup
+# ---------------------------------------------------------------------------
+
+
+def test_get_csrf_token_without_session() -> None:
+    request = Request(scope={"type": "http"})
+    assert get_csrf_token(request) == ""
+
+
+def test_get_csrf_token_without_session_key() -> None:
+    request = Request(scope={"type": "http", "session": {}})
+    assert get_csrf_token(request) == ""
+
+
+@pytest.mark.parametrize("value", [12345, None, ["token"]])
+def test_get_csrf_token_rejects_non_string_values(value: object) -> None:
+    request = Request(
+        scope={"type": "http", "session": {CSRF_SESSION_KEY: value}}
+    )
+    assert get_csrf_token(request) == ""
+
+
+def test_get_csrf_token_returns_valid_session_token() -> None:
+    request = Request(
+        scope={
+            "type": "http",
+            "session": {CSRF_SESSION_KEY: "secret-csrf-token"},
+        }
+    )
+    assert get_csrf_token(request) == "secret-csrf-token"
 
 
 # ---------------------------------------------------------------------------
