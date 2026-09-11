@@ -60,12 +60,6 @@ ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | {".pdf", ".txt"}
 MAX_UPLOAD_SIZE = 8 * 1024 * 1024
 PREVIEW_LIMIT = 2_000
 _CENT = Decimal("0.01")
-_SQL_IN_CHUNK_SIZE = 500
-
-
-def _chunked_ids(values: list[str]) -> Iterable[list[str]]:
-    for start in range(0, len(values), _SQL_IN_CHUNK_SIZE):
-        yield values[start : start + _SQL_IN_CHUNK_SIZE]
 
 
 class SlipUploadError(Exception):
@@ -249,7 +243,7 @@ class SlipStagingStore:
     ) -> list[SlipDetection]:
         safe_profile = slugify(profile) or "default"
         async with session_scope(self._factory) as session:
-            base_stmt = (
+            stmt = (
                 select(DocumentRow)
                 .where(DocumentRow.user_id == user_id)
                 .where(DocumentRow.profile_slug == safe_profile)
@@ -261,16 +255,16 @@ class SlipStagingStore:
                 requested = list(detection_ids)
                 if not requested:
                     return []
-                rows: list[DocumentRow] = []
-                unique_requested = list(dict.fromkeys(requested))
-                for id_chunk in _chunked_ids(unique_requested):
-                    result = await session.execute(
-                        base_stmt.where(col(DocumentRow.id).in_(id_chunk))
-                    )
-                    rows.extend(result.scalars().all())
+                requested_unique = list(set(requested))
+                rows = []
+                for i in range(0, len(requested_unique), 500):
+                    chunk = requested_unique[i : i + 500]
+                    chunk_stmt = stmt.where(col(DocumentRow.id).in_(chunk))
+                    res = await session.execute(chunk_stmt)
+                    rows.extend(res.scalars().all())
             else:
                 requested = None
-                result = await session.execute(base_stmt)
+                result = await session.execute(stmt)
                 rows = list(result.scalars().all())
             by_id = {row.id: row for row in rows}
 
@@ -289,11 +283,12 @@ class SlipStagingStore:
             applied = [_detection_from_row(row) for row in selected]
 
             if selected:
-                selected_ids = list(dict.fromkeys(row.id for row in selected))
-                for id_chunk in _chunked_ids(selected_ids):
+                selected_ids = list({row.id for row in selected})
+                for i in range(0, len(selected_ids), 500):
+                    chunk = selected_ids[i : i + 500]
                     await session.execute(
                         update(DocumentRow)
-                        .where(col(DocumentRow.id).in_(id_chunk))
+                        .where(col(DocumentRow.id).in_(chunk))
                         .values(status=DocumentStatus.APPLIED.value)
                     )
 
