@@ -156,6 +156,20 @@ def test_create_profile_preserves_a_concurrent_write(tmp_path, monkeypatch):
     assert 'full_name = "Concurrent Winner"' in profile_path.read_text(encoding="utf-8")
 
 
+def test_create_profile_redirect_cannot_become_external(tmp_path, monkeypatch):
+    _configure_profiles_dirs(monkeypatch, tmp_path)
+
+    client = _build_client()
+    response = client.post(
+        "/ui/profiles",
+        data={"name": r"//evil.example\taxpayer"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/ui/profiles/evil-example-taxpayer?created=1"
+
+
 def test_preview_displays_summary(tmp_path, monkeypatch):
     _configure_profiles_dirs(monkeypatch, tmp_path)
 
