@@ -1,5 +1,11 @@
 # Plan V3 Product Foundation
 
+> **Execution authority:** this document owns product direction and boundaries.
+> [`plan_v3_execution.md`](plan_v3_execution.md) owns the current implementation
+> order, verified status, dependencies and acceptance gates. Its stable task IDs
+> replace the historical 12-phase numbering; do not use this product document
+> or an untracked local plan as a competing execution sequence.
+
 > **Filing-channel correction.** This document was written before the
 > NETFILE/EFILE distinction was resolved, and it describes the repo's
 > EFILE-shaped filing stack as though that defined the product's filing path. It
@@ -280,23 +286,19 @@ B2B must not fork the tax engine. Partner experiences should call the same
 deterministic calculation, validation, source/evidence, confidence, and filing
 readiness contracts used by the consumer UI and CLI.
 
-## 11. Phased roadmap
+## 11. Execution roadmap
 
-Plan V3 should land through small, reviewable PRs:
+Follow the [authoritative execution queue](plan_v3_execution.md#execution-queue).
+The former 12-phase list has been replaced there with stable IDs, a verified
+baseline and explicit engine/consumer-flow gates. The existing product-layer
+contracts are preserved there with their historical phase numbers for lookup.
 
-1. Plan V3 docs and repo audit.
-2. Explanation models in `app/explain/`.
-3. Deterministic explanation engine in `app/explain/`.
-4. Read-only explanation API.
-5. CLI explain mode.
-6. Guided confidence primitives in `app/confidence/`.
-7. Refund waterfall.
-8. Source/proof ledger in `app/ledger/`.
-9. TeeFoor contract and safety package in `app/teefoor/`.
-10. TeeFoor Mirror lightweight skeleton.
-11. Evidence pack MVP in `app/evidence/`.
-12. AI provider router planning and stubs only.
+The foundation inputs are implemented, but the calculations consuming them are
+not complete. Finish and verify the declared supported calculation scope and
+integrated consumer flow before the explanation engine, refund waterfall,
+confidence, source/proof ledger, TeeFoor safety/Mirror and evidence pack.
+Provider stubs remain disabled; live provider integration and official NETFILE
+certification are not implied by completion of this roadmap's product layers.
 
-Each phase should stop when its contract is deterministic, tested, and safe to
-build on. Provider integrations come after safety, routing, privacy visibility,
-and deterministic explanation contracts are in place.
+Keep PRs small and reviewable. Completion requires deterministic behavior,
+reference-backed tests and the named acceptance gate, not a count of merged PRs.

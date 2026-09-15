@@ -1,5 +1,11 @@
 # Filing Channels: NETFILE (consumer) vs EFILE (preparer)
 
+> This document owns filing-channel constraints, not the implementation order.
+> Follow [`plan_v3_execution.md`](plan_v3_execution.md#execution-queue) for the
+> authoritative queue: **R2** implements the protocol-neutral consumer boundary;
+> **N1** remains blocked on official developer material and is a separate release
+> gate. Nothing in the roadmap correction verifies or changes the CRA claims below.
+
 Tax_App is a **consumer-first** Canadian personal tax product. The consumer filing
 path is **NETFILE**. EFILE is the professional/preparer channel.
 
