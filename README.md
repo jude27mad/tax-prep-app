@@ -1,7 +1,14 @@
 # Tax App
 
-CRA-focused toolkit for estimating personal income tax, preparing full T1
-returns, and assembling/validating EFILE XML (T619/T1/T183).
+Canadian personal tax app in development: a deterministic calculation engine,
+consumer UI and CLI, plus existing EFILE-shaped tooling. Full-return coverage
+and consumer NETFILE integration/certification are not complete; the legacy
+XML/T619 rehearsal is not proof of CRA certification.
+
+**Development starts here:** [execution roadmap](docs/plan_v3_execution.md)
+(current status, next task and acceptance gates),
+[product foundation](docs/plan_v3.md), and
+[filing-channel boundaries](docs/filing_channels.md).
 
 ---
 
@@ -61,9 +68,9 @@ Use this map as the mental "directory sign" at the repo entrance.
 
 * **Estimator API** (`app/main.py`): quick personal tax estimates for annual
   slips and payroll checks.
-* **Preparer API** (`app/api/http.py`): end-to-end T1 workflow including
-  validation, XML assembly (T619/T1/T183), EFILE transmission helpers,
-  printouts, and certification tooling.
+* **Preparer API** (`app/api/http.py`): preparation/printout endpoints and legacy
+  EFILE-shaped XML/transmission helpers. The consumer app wiring is unfinished;
+  see roadmap R2 before treating this as an end-to-end consumer deployment.
 * **Support packages**: reusable calculators, schema cache, artifact retention,
   and ingestion scripts.
 
@@ -152,12 +159,17 @@ when you are not using profiles.
 
 ## Provincial coverage
 
-The estimator currently supports 2025 provincial tax for:
+The 2025 calculator registry contains:
 
 * Ontario, British Columbia, Alberta, Manitoba, Saskatchewan,
   Nova Scotia, New Brunswick, Newfoundland and Labrador,
   Prince Edward Island, Yukon, Northwest Territories, Nunavut
-  (Québec handled separately).
+  (Québec is not registered).
+
+The 2024 registry contains ON, SK, NS, NB, NL, PE, YT, NT and NU; AB, BC, MB and
+QC are not registered for that year. These are calculator registrations, not
+claims of complete provincial filing coverage. The execution roadmap requires
+reference-backed support checks before declaring a case filing-ready.
 
 The wizard and API accept two-letter province codes (`ON`, `BC`, `AB`, `MB`);
 Ontario remains the default when omitted.
